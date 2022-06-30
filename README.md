@@ -33,6 +33,7 @@ Rename the file accordingly, then modify the file to update the `name` and `libr
 ### Update the developer's install/uninstall scripts under `script\[Un]install-layer.ps1`.
 
 You will be using these scripts to enable/disable the API layer from within your output folder (eg: run `bin\x64\Debug\Install-Layer.ps1` to activate the debug version of your layer during development).
+
 WARNING: Keep track of the content of your registry under `HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit`. You don't want to have multiple copies of your API layer active at once!
 
 ### Update the Windows Performance Recorder Profile (WPRP) tracelogging GUID in both `scripts\Tracing.wprp` and `XR_APILAYER_NOVENDOR_template\framework\log.cpp`.
@@ -53,6 +54,8 @@ In the layer's code:
                                  "OpenXRTemplate",
                                  (0xcbf3adcd, 0x42b1, 0x4c38, 0x83, 0x0c, 0x91, 0x98, 0x0a, 0xf2, 0x01, 0xf8));
 ```
+
+To capture a trace for your API layer:
 
 - Open a command line prompt or powershell in administrator mode and in a folder where you have write permissions
 - Begin recording a trace with the command: `wpr -start path\to\Tracing.wprp -filemode`
@@ -100,6 +103,7 @@ If your API layer uses graphics functions, such as the ones for Direct3D, you mu
 ### (Optional) Require OpenXR extensions in `XR_APILAYER_NOVENDOR_template\framework\dispatch.cpp`
 
 If your API layer requires a specific OpenXR extension, update the `implicitExtensions` vector in `XR_APILAYER_NOVENDOR_template\framework\dispatch.cpp` to list the extensions to request.
+
 WARNING: Not all OpenXR runtimes may support all extensions. It is recommended to query the list of supported extensions from the OpenXR runtime and only add to the `implicitExtensions` the extensions that are advertised by the platform.
 
 ```
