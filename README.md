@@ -104,19 +104,7 @@ If your API layer uses graphics functions, such as the ones for Direct3D, you mu
 
 If your API layer requires a specific OpenXR extension, update the `implicitExtensions` vector in `XR_APILAYER_NOVENDOR_template\framework\dispatch.cpp` to list the extensions to request.
 
-WARNING: Not all OpenXR runtimes may support all extensions. It is recommended to query the list of supported extensions from the OpenXR runtime and only add to the `implicitExtensions` the extensions that are advertised by the platform. You can use the following code to query the list of extensions:
-```
-    CHECK_XRCMD(apiLayerInfo->nextInfo->nextGetInstanceProcAddr(
-        XR_NULL_HANDLE,
-        "xrEnumerateInstanceExtensionProperties",
-        reinterpret_cast<PFN_xrVoidFunction*>(&xrEnumerateInstanceExtensionProperties)));
-
-    uint32_t extensionsCount = 0;
-    CHECK_XRCMD(xrEnumerateInstanceExtensionProperties(nullptr, 0, &extensionsCount, nullptr));
-    std::vector<XrExtensionProperties> extensions(extensionsCount, {XR_TYPE_EXTENSION_PROPERTIES});
-    CHECK_XRCMD(xrEnumerateInstanceExtensionProperties(
-        nullptr, extensionsCount, &extensionsCount, extensions.data()));
-```
+WARNING: Not all OpenXR runtimes may support all extensions. The API layer will interrogate the OpenXR runtime (and upstream layers) and only request the extensions that are advertised by the platform. You can subsequently call `GetGrantedExtensions()` to retrieve the list of implicit extensions that were successfully requested.
 
 ### (Optional) Expose an OpenXR extension
 

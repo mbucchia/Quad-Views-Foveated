@@ -68,6 +68,57 @@ namespace LAYER_NAMESPACE {
         std::vector<std::string> blockedExtensions;
         std::vector<std::string> implicitExtensions;
 
+        // Only request implicit extensions that are supported.
+        //
+        // While the OpenXR standard states that xrEnumerateInstanceExtensionProperties() can be queried without an
+        // instance, this does not stand for API layers, since API layers implementation might rely on the next
+        // xrGetInstanceProcAddr() pointer, which is not (yet) populated if no instance is created.
+        // We create a dummy instance in order to do these checks.
+        if (!implicitExtensions.empty()) {
+            XrInstance dummyInstance = XR_NULL_HANDLE;
+
+            // Call the chain to create a dummy instance. Request no extensions in order to speed things up.
+            XrInstanceCreateInfo dummyCreateInfo = *instanceCreateInfo;
+            dummyCreateInfo.enabledExtensionCount = 0;
+
+            XrApiLayerCreateInfo chainApiLayerInfo = *apiLayerInfo;
+            chainApiLayerInfo.nextInfo = apiLayerInfo->nextInfo->next;
+
+            CHECK_XRCMD(apiLayerInfo->nextInfo->nextCreateApiLayerInstance(
+                &dummyCreateInfo, &chainApiLayerInfo, &dummyInstance));
+
+            PFN_xrDestroyInstance xrDestroyInstance;
+            CHECK_XRCMD(apiLayerInfo->nextInfo->nextGetInstanceProcAddr(
+                dummyInstance, "xrDestroyInstance", reinterpret_cast<PFN_xrVoidFunction*>(&xrDestroyInstance)));
+
+            // Check the available extensions.
+            PFN_xrEnumerateInstanceExtensionProperties xrEnumerateInstanceExtensionProperties;
+            CHECK_XRCMD(apiLayerInfo->nextInfo->nextGetInstanceProcAddr(
+                dummyInstance,
+                "xrEnumerateInstanceExtensionProperties",
+                reinterpret_cast<PFN_xrVoidFunction*>(&xrEnumerateInstanceExtensionProperties)));
+
+            uint32_t extensionsCount = 0;
+            CHECK_XRCMD(xrEnumerateInstanceExtensionProperties(nullptr, 0, &extensionsCount, nullptr));
+            std::vector<XrExtensionProperties> extensions(extensionsCount, {XR_TYPE_EXTENSION_PROPERTIES});
+            CHECK_XRCMD(
+                xrEnumerateInstanceExtensionProperties(nullptr, extensionsCount, &extensionsCount, extensions.data()));
+
+            for (auto it = implicitExtensions.begin(); it != implicitExtensions.end();) {
+                const auto matchExtensionName = [&](const XrExtensionProperties& properties) {
+                    return properties.extensionName == *it;
+                };
+                if (std::find_if(extensions.cbegin(), extensions.cend(), matchExtensionName) != extensions.cend()) {
+                    it = ++it;
+                } else {
+                    Log("Cannot satisfy implicit extension request: %s\n", it->c_str());
+                    it = implicitExtensions.erase(it);
+                }
+            }
+
+            CHECK_XRCMD(xrDestroyInstance(dummyInstance));
+        }
+
         // Dump the requested extensions.
         XrInstanceCreateInfo chainInstanceCreateInfo = *instanceCreateInfo;
         std::vector<const char*> newEnabledExtensionNames;
@@ -98,6 +149,7 @@ namespace LAYER_NAMESPACE {
             // Create our layer.
             LAYER_NAMESPACE::GetInstance()->SetGetInstanceProcAddr(apiLayerInfo->nextInfo->nextGetInstanceProcAddr,
                                                                    *instance);
+            LAYER_NAMESPACE::GetInstance()->SetGrantedExtensions(implicitExtensions);
 
             // Forward the xrCreateInstance() call to the layer.
             try {

@@ -213,12 +213,18 @@ namespace LAYER_NAMESPACE
     {
 '''
 
-        for cur_cmd in self.core_commands + self.ext_commands:
+        for cur_cmd in self.core_commands:
             if cur_cmd.name in layer_apis.requested_functions:
                 generated += f'''		if (XR_FAILED(m_xrGetInstanceProcAddr(m_instance, "{cur_cmd.name}", reinterpret_cast<PFN_xrVoidFunction*>(&m_{cur_cmd.name}))))
 		{{
 			throw new std::runtime_error("Failed to resolve {cur_cmd.name}");
 		}}
+'''
+
+        # Functions from extensions are allowed to be null.
+        for cur_cmd in self.ext_commands:
+            if cur_cmd.name in layer_apis.requested_functions:
+                generated += f'''		m_xrGetInstanceProcAddr(m_instance, "{cur_cmd.name}", reinterpret_cast<PFN_xrVoidFunction*>(&m_{cur_cmd.name}));
 '''
 
         generated += '''		m_applicationName = createInfo->applicationInfo.applicationName;
@@ -287,6 +293,7 @@ namespace LAYER_NAMESPACE
 	private:
 		XrInstance m_instance{ XR_NULL_HANDLE };
 		std::string m_applicationName;
+		std::vector<std::string> m_grantedExtensions;
 
 	protected:
 		OpenXrApi() = default;
@@ -306,10 +313,20 @@ namespace LAYER_NAMESPACE
 			return m_applicationName;
 		}
 
+		const std::vector<std::string>& GetGrantedExtensions() const
+		{
+			return m_grantedExtensions;
+		}
+
 		void SetGetInstanceProcAddr(PFN_xrGetInstanceProcAddr pfn_xrGetInstanceProcAddr, XrInstance instance)
 		{
 			m_xrGetInstanceProcAddr = pfn_xrGetInstanceProcAddr;
 			m_instance = instance;
+		}
+
+		void SetGrantedExtensions(std::vector<std::string>& grantedExtensions)
+		{
+			m_grantedExtensions = grantedExtensions;
 		}
 
 		// Specially-handled by the auto-generated code.
