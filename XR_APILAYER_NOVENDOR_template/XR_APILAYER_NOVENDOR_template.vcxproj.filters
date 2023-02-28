@@ -12,6 +12,9 @@
     <Filter Include="Framework">
       <UniqueIdentifier>{060fbbc6-44b1-4494-b904-cb9719cec138}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Utilities">
+      <UniqueIdentifier>{6373cac3-099d-4c47-8bd7-9127fde36131}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">
@@ -31,6 +34,12 @@
     </ClInclude>
     <ClInclude Include="framework\util.h">
       <Filter>Framework</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\graphics.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\general.h">
+      <Filter>Utilities</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
