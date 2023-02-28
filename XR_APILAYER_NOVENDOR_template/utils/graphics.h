@@ -27,9 +27,27 @@
 namespace openxr_api_layer::utils::graphics {
 
     enum class Api {
+#ifdef XR_USE_GRAPHICS_API_D3D11
+        D3D11,
+#endif
     };
     enum class CompositionApi {
+#ifdef XR_USE_GRAPHICS_API_D3D11
+        D3D11,
+#endif
     };
+
+#ifdef XR_USE_GRAPHICS_API_D3D11
+    // Type traits for all graphics APIs.
+    struct D3D11 {
+        static constexpr Api Api = Api::D3D11;
+
+        using Device = ID3D11Device*;
+        using Context = ID3D11DeviceContext*;
+        using Texture = ID3D11Texture2D*;
+        using Fence = ID3D11Fence*;
+    };
+#endif
 
     // We (arbitrarily) use DXGI as a common conversion point for all graphics APIs.
     using GenericFormat = DXGI_FORMAT;
@@ -226,5 +244,14 @@ namespace openxr_api_layer::utils::graphics {
 
     std::shared_ptr<ICompositionFramework> createCompositionFramework(PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr,
                                                                       CompositionApi compositionApi);
+
+    namespace internal {
+
+#ifdef XR_USE_GRAPHICS_API_D3D11
+        std::shared_ptr<IGraphicsDevice> createD3D11CompositionDevice(LUID adapterLuid);
+        std::shared_ptr<IGraphicsDevice> wrapApplicationDevice(const XrGraphicsBindingD3D11KHR& bindings);
+#endif
+
+    } // namespace internal
 
 } // namespace openxr_api_layer::utils::graphics

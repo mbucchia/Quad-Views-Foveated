@@ -61,6 +61,9 @@
     <ClCompile Include="framework\log.cpp">
       <Filter>Framework</Filter>
     </ClCompile>
+    <ClCompile Include="utils\d3d11.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="XR_APILAYER_NOVENDOR_template.json" />
