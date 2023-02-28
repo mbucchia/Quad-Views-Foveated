@@ -142,4 +142,89 @@ namespace openxr_api_layer::utils::graphics {
         }
     };
 
+    // Modes of use of wrapped swapchains.
+    enum class SwapchainMode {
+        // The swapchain must be submittable to the upstream xrEndFrame() implementation.
+        // A non-submittable swapchain does not have an XrSwapchain handle.
+        Submit = 0,
+
+        // The swapchain will be accessed for reading during composition in the layer's xrEndFrame() implementation.
+        // A readable swapchain might require a copy to the composition device before composition.
+        Read,
+
+        // The swapchain will be access for writing during composition in the layer's xrEndFrame() implementation.
+        // A writable swapchain might require a copy from the composition device after composition.
+        Write,
+    };
+    DEFINE_ENUM_FLAG_OPERATORS(SwapchainMode);
+
+    struct ISwapchainImage;
+
+    // A swapchain.
+    struct ISwapchain {
+        virtual ~ISwapchain() = default;
+
+        // Only for manipulating swapchains created through createSwapchain().
+        virtual ISwapchainImage* acquireImage(bool wait = true) = 0;
+        virtual void waitImage() = 0;
+        virtual void releaseImage() = 0;
+
+        // Only for manipulating swapchains created through xrCreateSwapchain_post().
+        virtual ISwapchainImage* getLastReleasedImage() const = 0;
+        virtual void commitLastReleasedImage() = 0;
+
+        virtual const XrSwapchainCreateInfo& getInfoOnCompositionDevice() const = 0;
+        virtual int64_t getFormatOnApplicationDevice() const = 0;
+        virtual ISwapchainImage* getImage(uint32_t index) const = 0;
+        virtual uint32_t getLength() const = 0;
+
+        // Will only return a valid handle if the swapchain is submittable.
+        virtual XrSwapchain getXrHandle() const = 0;
+    };
+
+    // A swapchain image.
+    struct ISwapchainImage {
+        virtual ~ISwapchainImage() = default;
+
+        virtual IGraphicsTexture* getApplicationTexture() const = 0;
+        virtual IGraphicsTexture* getTextureForRead() const = 0;
+        virtual IGraphicsTexture* getTextureForWrite() const = 0;
+
+        virtual uint32_t getIndex() const = 0;
+    };
+
+    // A collection of hooks and utilities to perform composition in the layer.
+    struct ICompositionFramework {
+        virtual ~ICompositionFramework() = default;
+
+        // Must be called after chaining to the upstream xrCreateInstance() implementation.
+        virtual void xrCreateInstance_post(const XrInstanceCreateInfo& info, XrInstance instance) = 0;
+
+        // Must be called after chaining to the upstream xrCreateSession() implementation.
+        virtual void xrCreateSession_post(const XrSessionCreateInfo& info, XrSession session) = 0;
+
+        // Must be called before chaining to the upstream xrDestroySession() implementation.
+        virtual void xrDestroySession_pre() = 0;
+
+        // Create a swapchain without an XrSwapchain handle.
+        virtual std::shared_ptr<ISwapchain> createSwapchain(const XrSwapchainCreateInfo& infoOnApplicationDevice,
+                                                            SwapchainMode mode) = 0;
+
+        // Must be called at the beginning of the layer's xrEndFrame() implementation to serialize application commands
+        // prior to composition.
+        virtual void serializePreComposition() = 0;
+
+        // Must be called before chaining to the upstream xrEndFrame() implementation to serialize composition commands
+        // prior to submission.
+        virtual void serializePostComposition() = 0;
+
+        virtual IGraphicsDevice* getCompositionDevice() const = 0;
+        virtual IGraphicsDevice* getApplicationDevice() const = 0;
+        virtual int64_t getPreferredSwapchainFormatOnApplicationDevice(XrSwapchainUsageFlags usageFlags,
+                                                                       bool preferSRGB = true) const = 0;
+    };
+
+    std::shared_ptr<ICompositionFramework> createCompositionFramework(PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr,
+                                                                      CompositionApi compositionApi);
+
 } // namespace openxr_api_layer::utils::graphics
