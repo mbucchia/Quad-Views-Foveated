@@ -217,7 +217,7 @@ namespace LAYER_NAMESPACE
             if cur_cmd.name in layer_apis.requested_functions:
                 generated += f'''		if (XR_FAILED(m_xrGetInstanceProcAddr(m_instance, "{cur_cmd.name}", reinterpret_cast<PFN_xrVoidFunction*>(&m_{cur_cmd.name}))))
 		{{
-			throw new std::runtime_error("Failed to resolve {cur_cmd.name}");
+			throw std::runtime_error("Failed to resolve {cur_cmd.name}");
 		}}
 '''
 
