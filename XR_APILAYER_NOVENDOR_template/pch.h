@@ -22,17 +22,25 @@
 
 #pragma once
 
+// Uncomment below the graphics frameworks used by the layer.
+
+//#define XR_USE_GRAPHICS_API_D3D11
+
 // Standard library.
 #include <algorithm>
 #include <cstdarg>
 #include <ctime>
+#include <deque>
 #include <iomanip>
 #include <iostream>
+#include <mutex>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <memory>
+#include <optional>
+#include <set>
 
 using namespace std::chrono_literals;
 
@@ -46,6 +54,12 @@ using namespace std::chrono_literals;
 #include <traceloggingprovider.h>
 
 using Microsoft::WRL::ComPtr;
+
+// Graphics APIs.
+#include <dxgiformat.h>
+#ifdef XR_USE_GRAPHICS_API_D3D11
+#include <d3d11_4.h>
+#endif
 
 // OpenXR + Windows-specific definitions.
 #define XR_NO_PROTOTYPES
@@ -65,3 +79,6 @@ using Microsoft::WRL::ComPtr;
 
 // FMT formatter.
 #include <fmt/format.h>
+
+// Utilities framework.
+#include <utils/graphics.h>
