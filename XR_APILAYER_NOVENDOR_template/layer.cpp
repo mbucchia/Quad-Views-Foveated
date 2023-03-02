@@ -39,6 +39,22 @@ namespace {
 
         ~OpenXrLayer() = default;
 
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrGetInstanceProcAddr
+        XrResult xrGetInstanceProcAddr(XrInstance instance, const char* name, PFN_xrVoidFunction* function) override {
+            TraceLoggingWrite(g_traceProvider,
+                              "xrGetInstanceProcAddr",
+                              TLPArg(instance, "Instance"),
+                              TLArg(name, "Name"),
+                              TLArg(m_bypassApiLayer, "Bypass"));
+
+            XrResult result = m_bypassApiLayer ? m_xrGetInstanceProcAddr(instance, name, function)
+                                               : OpenXrApi::xrGetInstanceProcAddr(instance, name, function);
+
+            TraceLoggingWrite(g_traceProvider, "xrGetInstanceProcAddr", TLPArg(*function, "Function"));
+
+            return result;
+        }
+
         XrResult xrCreateInstance(const XrInstanceCreateInfo* createInfo) override {
             if (createInfo->type != XR_TYPE_INSTANCE_CREATE_INFO) {
                 return XR_ERROR_VALIDATION_FAILURE;
@@ -52,6 +68,15 @@ namespace {
                               TLArg(createInfo->applicationInfo.engineName, "EngineName"),
                               TLArg(createInfo->applicationInfo.engineVersion, "EngineVersion"),
                               TLArg(createInfo->createFlags, "CreateFlags"));
+            Log("Application: %s\n", createInfo->applicationInfo.applicationName);
+
+            // Here there can be rules to disable the API layer entirely (based on applicationName for example).
+            // m_bypassApiLayer = ...
+
+            if (m_bypassApiLayer) {
+                Log("%s layer will be bypassed\n", LayerName.c_str());
+                return XR_SUCCESS;
+            }
 
             for (uint32_t i = 0; i < createInfo->enabledApiLayerCount; i++) {
                 TraceLoggingWrite(
@@ -74,7 +99,6 @@ namespace {
                                                  XR_VERSION_MINOR(instanceProperties.runtimeVersion),
                                                  XR_VERSION_PATCH(instanceProperties.runtimeVersion));
             TraceLoggingWrite(g_traceProvider, "xrCreateInstance", TLArg(runtimeName.c_str(), "RuntimeName"));
-            Log("Application: %s\n", GetApplicationName().c_str());
             Log("Using OpenXR runtime: %s\n", runtimeName.c_str());
 
             return XR_SUCCESS;
@@ -137,6 +161,7 @@ namespace {
             return systemId == m_systemId;
         }
 
+        bool m_bypassApiLayer{false};
         XrSystemId m_systemId{XR_NULL_SYSTEM_ID};
     };
 
