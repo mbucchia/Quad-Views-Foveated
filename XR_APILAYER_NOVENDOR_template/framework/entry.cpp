@@ -77,7 +77,7 @@ XrResult __declspec(dllexport) XRAPI_CALL
     DebugLog("--> xrNegotiateLoaderApiLayerInterface\n");
 
     if (apiLayerName && apiLayerName != LayerName) {
-        ErrorLog("Invalid apiLayerName \"%s\"\n", apiLayerName);
+        ErrorLog(fmt::format("Invalid apiLayerName \"{}\"\n", apiLayerName));
         return XR_ERROR_INITIALIZATION_FAILED;
     }
 
@@ -103,7 +103,7 @@ XrResult __declspec(dllexport) XRAPI_CALL
 
     DebugLog("<-- xrNegotiateLoaderApiLayerInterface\n");
 
-    Log("%s layer (%s) is active\n", LayerName.c_str(), VersionString.c_str());
+    Log(fmt::format("{} layer ({}) is active\n", LayerName, VersionString));
 
     TraceLoggingWrite(g_traceProvider, "xrNegotiateLoaderApiLayerInterface_Complete");
 

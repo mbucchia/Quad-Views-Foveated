@@ -174,13 +174,13 @@ namespace LAYER_NAMESPACE
 		catch (std::exception exc)
 		{{
 			TraceLoggingWrite(g_traceProvider, "{cur_cmd.name}_Error", TLArg(exc.what(), "Error"));
-			ErrorLog("{cur_cmd.name}: %s\\n", exc.what());
+			ErrorLog(fmt::format("{cur_cmd.name}: {{}}\\n", exc.what()));
 			result = XR_ERROR_RUNTIME_FAILURE;
 		}}
 
 		TraceLoggingWrite(g_traceProvider, "{cur_cmd.name}_Result", TLArg(xr::ToCString(result), "Result"));
 		if (XR_FAILED(result)) {{
-			ErrorLog("{cur_cmd.name} failed with %s\\n", xr::ToCString(result));
+			ErrorLog(fmt::format("{cur_cmd.name} failed with {{}}\\n", xr::ToCString(result)));
 		}}
 
 		return result;
@@ -199,7 +199,7 @@ namespace LAYER_NAMESPACE
 		catch (std::runtime_error exc)
 		{{
 			TraceLoggingWrite(g_traceProvider, "{cur_cmd.name}_Error", TLArg(exc.what(), "Error"));
-			ErrorLog("{cur_cmd.name}: %s\\n", exc.what());
+			ErrorLog(fmt::format("{cur_cmd.name}: {{}}\\n", exc.what()));
 		}}
 
 		TraceLoggingWrite(g_traceProvider, "{cur_cmd.name}_Complete");

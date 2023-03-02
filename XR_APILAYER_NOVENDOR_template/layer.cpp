@@ -20,8 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
-
 #include "pch.h"
 
 #include "layer.h"
@@ -37,6 +35,8 @@ namespace {
       public:
         OpenXrLayer() = default;
 
+        // Corresponds to xrDestroyInstance().
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrCreateInstance
         ~OpenXrLayer() = default;
 
         // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrGetInstanceProcAddr
@@ -55,6 +55,7 @@ namespace {
             return result;
         }
 
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrCreateInstance
         XrResult xrCreateInstance(const XrInstanceCreateInfo* createInfo) override {
             if (createInfo->type != XR_TYPE_INSTANCE_CREATE_INFO) {
                 return XR_ERROR_VALIDATION_FAILURE;
@@ -68,13 +69,13 @@ namespace {
                               TLArg(createInfo->applicationInfo.engineName, "EngineName"),
                               TLArg(createInfo->applicationInfo.engineVersion, "EngineVersion"),
                               TLArg(createInfo->createFlags, "CreateFlags"));
-            Log("Application: %s\n", createInfo->applicationInfo.applicationName);
+            Log(fmt::format("Application: {}\n", createInfo->applicationInfo.applicationName));
 
             // Here there can be rules to disable the API layer entirely (based on applicationName for example).
             // m_bypassApiLayer = ...
 
             if (m_bypassApiLayer) {
-                Log("%s layer will be bypassed\n", LayerName.c_str());
+                Log(fmt::format("{} layer will be bypassed\n", LayerName));
                 return XR_SUCCESS;
             }
 
@@ -99,11 +100,12 @@ namespace {
                                                  XR_VERSION_MINOR(instanceProperties.runtimeVersion),
                                                  XR_VERSION_PATCH(instanceProperties.runtimeVersion));
             TraceLoggingWrite(g_traceProvider, "xrCreateInstance", TLArg(runtimeName.c_str(), "RuntimeName"));
-            Log("Using OpenXR runtime: %s\n", runtimeName.c_str());
+            Log(fmt::format("Using OpenXR runtime: {}\n", runtimeName));
 
             return XR_SUCCESS;
         }
 
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrGetSystem
         XrResult xrGetSystem(XrInstance instance, const XrSystemGetInfo* getInfo, XrSystemId* systemId) override {
             if (getInfo->type != XR_TYPE_SYSTEM_GET_INFO) {
                 return XR_ERROR_VALIDATION_FAILURE;
@@ -120,7 +122,7 @@ namespace {
                     XrSystemProperties systemProperties{XR_TYPE_SYSTEM_PROPERTIES};
                     CHECK_XRCMD(OpenXrApi::xrGetSystemProperties(instance, *systemId, &systemProperties));
                     TraceLoggingWrite(g_traceProvider, "xrGetSystem", TLArg(systemProperties.systemName, "SystemName"));
-                    Log("Using OpenXR system: %s\n", systemProperties.systemName);
+                    Log(fmt::format("Using OpenXR system: {}\n", systemProperties.systemName));
                 }
 
                 // Remember the XrSystemId to use.
@@ -132,6 +134,7 @@ namespace {
             return result;
         }
 
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrCreateSession
         XrResult xrCreateSession(XrInstance instance,
                                  const XrSessionCreateInfo* createInfo,
                                  XrSession* session) override {
@@ -189,9 +192,12 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         TraceLoggingRegister(layer_template::log::g_traceProvider);
         break;
 
+    case DLL_PROCESS_DETACH:
+        TraceLoggingUnregister(layer_template::log::g_traceProvider);
+        break;
+
     case DLL_THREAD_ATTACH:
     case DLL_THREAD_DETACH:
-    case DLL_PROCESS_DETACH:
         break;
     }
     return TRUE;
