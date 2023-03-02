@@ -118,13 +118,9 @@ class DispatchGenCppOutputGenerator(DispatchGenOutputGenerator):
 #include "dispatch.h"
 #include "log.h"
 
-#ifndef LAYER_NAMESPACE
-#error Must define LAYER_NAMESPACE
-#endif
+using namespace openxr_api_layer::log;
 
-using namespace LAYER_NAMESPACE::log;
-
-namespace LAYER_NAMESPACE
+namespace openxr_api_layer
 {'''
         write(preamble, file=self.outFile)
 
@@ -133,7 +129,7 @@ namespace LAYER_NAMESPACE
         generated_get_instance_proc_addr = self.genGetInstanceProcAddr()
         generated_create_instance = self.genCreateInstance()
 
-        postamble = '''} // namespace LAYER_NAMESPACE
+        postamble = '''} // namespace openxr_api_layer
 '''
 
         contents = f'''
@@ -168,7 +164,7 @@ namespace LAYER_NAMESPACE
 		XrResult result;
 		try
 		{{
-			result = LAYER_NAMESPACE::GetInstance()->{cur_cmd.name}({arguments_list});
+			result = openxr_api_layer::GetInstance()->{cur_cmd.name}({arguments_list});
 		}}
 		catch (std::exception exc)
 		{{
@@ -193,7 +189,7 @@ namespace LAYER_NAMESPACE
 
 		try
 		{{
-			LAYER_NAMESPACE::GetInstance()->{cur_cmd.name}({arguments_list});
+			openxr_api_layer::GetInstance()->{cur_cmd.name}({arguments_list});
 		}}
 		catch (std::runtime_error exc)
 		{{
@@ -242,7 +238,7 @@ namespace LAYER_NAMESPACE
 		if (apiName == "xrDestroyInstance")
 		{
 			m_xrDestroyInstance = reinterpret_cast<PFN_xrDestroyInstance>(*function);
-			*function = reinterpret_cast<PFN_xrVoidFunction>(LAYER_NAMESPACE::xrDestroyInstance);
+			*function = reinterpret_cast<PFN_xrVoidFunction>(openxr_api_layer::xrDestroyInstance);
 		}
 '''
 
@@ -251,7 +247,7 @@ namespace LAYER_NAMESPACE
                 generated += f'''		else if (apiName == "{cur_cmd.name}")
 		{{
 			m_{cur_cmd.name} = reinterpret_cast<PFN_{cur_cmd.name}>(*function);
-			*function = reinterpret_cast<PFN_xrVoidFunction>(LAYER_NAMESPACE::{cur_cmd.name});
+			*function = reinterpret_cast<PFN_xrVoidFunction>(openxr_api_layer::{cur_cmd.name});
 		}}
 '''
 
@@ -261,7 +257,7 @@ namespace LAYER_NAMESPACE
                 generated += f'''		else if (apiName == "{cur_cmd.name}")
 		{{
 			m_{cur_cmd.name} = reinterpret_cast<PFN_{cur_cmd.name}>(*function);
-			*function = reinterpret_cast<PFN_xrVoidFunction>(LAYER_NAMESPACE::{cur_cmd.name});
+			*function = reinterpret_cast<PFN_xrVoidFunction>(openxr_api_layer::{cur_cmd.name});
 			result = XR_SUCCESS;
 		}}
 '''
@@ -280,11 +276,7 @@ class DispatchGenHOutputGenerator(DispatchGenOutputGenerator):
         DispatchGenOutputGenerator.beginFile(self, genOpts)
         preamble = '''#pragma once
 
-#ifndef LAYER_NAMESPACE
-#error Must define LAYER_NAMESPACE
-#endif
-
-namespace LAYER_NAMESPACE
+namespace openxr_api_layer
 {
 
 	class OpenXrApi
@@ -340,7 +332,7 @@ namespace LAYER_NAMESPACE
         postamble = '''
 	};
 
-} // namespace LAYER_NAMESPACE
+} // namespace openxr_api_layer
 '''
 
         contents = f'''

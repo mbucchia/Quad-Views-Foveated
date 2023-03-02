@@ -24,7 +24,7 @@
 
 #include "pch.h"
 
-namespace LAYER_NAMESPACE::log {
+namespace openxr_api_layer::log {
 
     TRACELOGGING_DECLARE_PROVIDER(g_traceProvider);
 
@@ -60,4 +60,4 @@ namespace LAYER_NAMESPACE::log {
         Log(str.data());
     }
 
-} // namespace LAYER_NAMESPACE::log
+} // namespace openxr_api_layer::log

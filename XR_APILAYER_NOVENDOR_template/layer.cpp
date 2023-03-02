@@ -28,10 +28,10 @@
 
 namespace {
 
-    using namespace layer_template;
-    using namespace layer_template::log;
+    using namespace openxr_api_layer;
+    using namespace openxr_api_layer::log;
 
-    class OpenXrLayer : public layer_template::OpenXrApi {
+    class OpenXrLayer : public openxr_api_layer::OpenXrApi {
       public:
         OpenXrLayer() = default;
 
@@ -172,7 +172,7 @@ namespace {
 
 } // namespace
 
-namespace layer_template {
+namespace openxr_api_layer {
     OpenXrApi* GetInstance() {
         if (!g_instance) {
             g_instance = std::make_unique<OpenXrLayer>();
@@ -184,16 +184,16 @@ namespace layer_template {
         g_instance.reset();
     }
 
-} // namespace layer_template
+} // namespace openxr_api_layer
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     switch (ul_reason_for_call) {
     case DLL_PROCESS_ATTACH:
-        TraceLoggingRegister(layer_template::log::g_traceProvider);
+        TraceLoggingRegister(openxr_api_layer::log::g_traceProvider);
         break;
 
     case DLL_PROCESS_DETACH:
-        TraceLoggingUnregister(layer_template::log::g_traceProvider);
+        TraceLoggingUnregister(openxr_api_layer::log::g_traceProvider);
         break;
 
     case DLL_THREAD_ATTACH:

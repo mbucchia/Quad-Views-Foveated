@@ -24,7 +24,7 @@
 
 #include "framework/dispatch.gen.h"
 
-namespace layer_template {
+namespace openxr_api_layer {
 
     const std::string LayerName = "XR_APILAYER_NOVENDOR_template";
     const std::string VersionString = "Unreleased (0.0.0)";
@@ -35,4 +35,4 @@ namespace layer_template {
     // A function to reset (delete) the singleton.
     void ResetInstance();
 
-} // namespace layer_template
+} // namespace openxr_api_layer

@@ -68,10 +68,6 @@ Use an application such as [Tabnalysis](https://apps.microsoft.com/store/detail/
 
 ### Customize the layer code
 
-In the project's properties, update the Preprocessor Definition for `LAYER_NAMESPACE` to a namespace that fits your project better. Remember to do this for both the Debug and Release profile.
-
-Update the `namespace` and `using namespace` declarations accordingly in the `XR_APILAYER_NOVENDOR_template\layer.cpp` and `XR_APILAYER_NOVENDOR_template\layer.h` files.
-
 Update the pretty name for your API layer in `XR_APILAYER_NOVENDOR_template\layer.h`, by changing the string for `LayerName` and `VersionString`.
 
 NOTE: Because an OpenXR API layer is tied to a particular instance, you may retrieve the `XrInstance` handle at any time by invoking `OpenXrApi::GetXrInstance()`.
