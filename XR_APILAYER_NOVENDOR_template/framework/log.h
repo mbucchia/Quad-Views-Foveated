@@ -36,6 +36,11 @@ namespace LAYER_NAMESPACE::log {
 
 #define TLArg(var, ...) TraceLoggingValue(var, ##__VA_ARGS__)
 #define TLPArg(var, ...) TraceLoggingPointer(var, ##__VA_ARGS__)
+#ifdef _M_IX86
+#define TLXArg TLArg
+#else
+#define TLXArg TLPArg
+#endif
 
     // General logging function.
     void Log(const char* fmt, ...);

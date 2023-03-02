@@ -43,7 +43,7 @@ namespace {
         XrResult xrGetInstanceProcAddr(XrInstance instance, const char* name, PFN_xrVoidFunction* function) override {
             TraceLoggingWrite(g_traceProvider,
                               "xrGetInstanceProcAddr",
-                              TLPArg(instance, "Instance"),
+                              TLXArg(instance, "Instance"),
                               TLArg(name, "Name"),
                               TLArg(m_bypassApiLayer, "Bypass"));
 
@@ -113,7 +113,7 @@ namespace {
 
             TraceLoggingWrite(g_traceProvider,
                               "xrGetSystem",
-                              TLPArg(instance, "Instance"),
+                              TLXArg(instance, "Instance"),
                               TLArg(xr::ToCString(getInfo->formFactor), "FormFactor"));
 
             const XrResult result = OpenXrApi::xrGetSystem(instance, getInfo, systemId);
@@ -144,7 +144,7 @@ namespace {
 
             TraceLoggingWrite(g_traceProvider,
                               "xrCreateSession",
-                              TLPArg(instance, "Instance"),
+                              TLXArg(instance, "Instance"),
                               TLArg((int)createInfo->systemId, "SystemId"),
                               TLArg(createInfo->createFlags, "CreateFlags"));
 
@@ -153,7 +153,7 @@ namespace {
                 if (isSystemHandled(createInfo->systemId)) {
                 }
 
-                TraceLoggingWrite(g_traceProvider, "xrCreateSession", TLPArg(*session, "Session"));
+                TraceLoggingWrite(g_traceProvider, "xrCreateSession", TLXArg(*session, "Session"));
             }
 
             return result;

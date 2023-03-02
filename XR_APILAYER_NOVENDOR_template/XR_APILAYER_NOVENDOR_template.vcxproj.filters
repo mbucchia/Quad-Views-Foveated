@@ -62,5 +62,7 @@
       <Filter>Framework</Filter>
     </None>
     <None Include="packages.config" />
+    <None Include="XR_APILAYER_NOVENDOR_template-32.json" />
+    <None Include="module.def" />
   </ItemGroup>
 </Project>

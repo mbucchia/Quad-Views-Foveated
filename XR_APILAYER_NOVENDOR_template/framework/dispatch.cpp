@@ -36,7 +36,7 @@ using namespace LAYER_NAMESPACE::log;
 namespace LAYER_NAMESPACE {
 
     // Entry point for creating the layer.
-    XrResult xrCreateApiLayerInstance(const XrInstanceCreateInfo* const instanceCreateInfo,
+    XrResult XRAPI_CALL xrCreateApiLayerInstance(const XrInstanceCreateInfo* const instanceCreateInfo,
                                       const struct XrApiLayerCreateInfo* const apiLayerInfo,
                                       XrInstance* const instance) {
         TraceLoggingWrite(g_traceProvider, "xrCreateApiLayerInstance");
@@ -178,7 +178,7 @@ namespace LAYER_NAMESPACE {
     }
 
     // Handle cleanup of the layer's singleton.
-    XrResult xrDestroyInstance(XrInstance instance) {
+    XrResult XRAPI_CALL xrDestroyInstance(XrInstance instance) {
         TraceLoggingWrite(g_traceProvider, "xrDestroyInstance");
 
         XrResult result;
@@ -202,7 +202,7 @@ namespace LAYER_NAMESPACE {
     }
 
     // Forward the xrGetInstanceProcAddr() call to the dispatcher.
-    XrResult xrGetInstanceProcAddr(XrInstance instance, const char* name, PFN_xrVoidFunction* function) {
+    XrResult XRAPI_CALL xrGetInstanceProcAddr(XrInstance instance, const char* name, PFN_xrVoidFunction* function) {
         TraceLoggingWrite(g_traceProvider, "xrGetInstanceProcAddr");
 
         XrResult result;
