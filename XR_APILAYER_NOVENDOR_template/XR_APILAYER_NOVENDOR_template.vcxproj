@@ -305,6 +305,7 @@ copy $(SolutionDir)\scripts\Uninstall-Layer32.ps1 $(OutDir)
     </ClCompile>
     <ClCompile Include="utils\composition.cpp" />
     <ClCompile Include="utils\d3d11.cpp" />
+    <ClCompile Include="utils\d3d12.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="framework\dispatch_generator.py" />

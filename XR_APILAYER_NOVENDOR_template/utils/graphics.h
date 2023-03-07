@@ -30,6 +30,9 @@ namespace openxr_api_layer::utils::graphics {
 #ifdef XR_USE_GRAPHICS_API_D3D11
         D3D11,
 #endif
+#ifdef XR_USE_GRAPHICS_API_D3D12
+        D3D12,
+#endif
     };
     enum class CompositionApi {
 #ifdef XR_USE_GRAPHICS_API_D3D11
@@ -46,6 +49,17 @@ namespace openxr_api_layer::utils::graphics {
         using Context = ID3D11DeviceContext*;
         using Texture = ID3D11Texture2D*;
         using Fence = ID3D11Fence*;
+    };
+#endif
+
+#ifdef XR_USE_GRAPHICS_API_D3D12
+    struct D3D12 {
+        static constexpr Api Api = Api::D3D12;
+
+        using Device = ID3D12Device*;
+        using Context = ID3D12CommandQueue*;
+        using Texture = ID3D12Resource*;
+        using Fence = ID3D12Fence*;
     };
 #endif
 
@@ -250,6 +264,10 @@ namespace openxr_api_layer::utils::graphics {
 #ifdef XR_USE_GRAPHICS_API_D3D11
         std::shared_ptr<IGraphicsDevice> createD3D11CompositionDevice(LUID adapterLuid);
         std::shared_ptr<IGraphicsDevice> wrapApplicationDevice(const XrGraphicsBindingD3D11KHR& bindings);
+#endif
+
+#ifdef XR_USE_GRAPHICS_API_D3D12
+        std::shared_ptr<IGraphicsDevice> wrapApplicationDevice(const XrGraphicsBindingD3D12KHR& bindings);
 #endif
 
     } // namespace internal

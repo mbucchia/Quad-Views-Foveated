@@ -119,6 +119,18 @@ namespace {
                 }
             } break;
 #endif
+#ifdef XR_USE_GRAPHICS_API_D3D12
+            case Api::D3D12: {
+                std::vector<XrSwapchainImageD3D12KHR> images(imagesCount, {XR_TYPE_SWAPCHAIN_IMAGE_D3D12_KHR});
+                CHECK_XRCMD(xrEnumerateSwapchainImages(m_swapchain,
+                                                       imagesCount,
+                                                       &imagesCount,
+                                                       reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())));
+                for (const XrSwapchainImageD3D12KHR& image : images) {
+                    textures.push_back(m_applicationDevice->openTexture<D3D12>(image.texture, infoOnApplicationDevice));
+                }
+            } break;
+#endif
             default:
                 throw std::runtime_error("Api not supported");
             }
@@ -126,11 +138,11 @@ namespace {
             // Make the images available on the composition device.
             uint32_t index = 0;
             for (std::shared_ptr<IGraphicsTexture>& textureOnApplicationDevice : textures) {
+                // TODO: Varjo D3D12 support does not seem to truly shareable and requires a quirk.
                 if (textureOnApplicationDevice->isShareable()) {
                     const std::shared_ptr<IGraphicsTexture> textureOnCompositionDevice =
-                        m_compositionDevice->openTexture(
-                            textureOnApplicationDevice->getTextureHandle(),
-                            m_infoOnCompositionDevice);
+                        m_compositionDevice->openTexture(textureOnApplicationDevice->getTextureHandle(),
+                                                         m_infoOnCompositionDevice);
                     m_images.push_back(std::make_unique<SwapchainImage>(
                         textureOnApplicationDevice, textureOnCompositionDevice, index));
                 } else {
@@ -141,11 +153,7 @@ namespace {
                         m_bounceBufferOnCompositionDevice =
                             m_compositionDevice->createTexture(m_infoOnCompositionDevice, true /* shareable */);
                         m_bounceBufferOnApplicationDevice = m_applicationDevice->openTexture(
-                            m_bounceBufferOnCompositionDevice->getTextureHandle(),
-                            infoOnApplicationDevice);
-                        m_fenceOnCompositionDevice = m_compositionDevice->createFence();
-                        m_fenceOnApplicationDevice = m_applicationDevice->openFence(
-                            m_fenceOnCompositionDevice->getFenceHandle());
+                            m_bounceBufferOnCompositionDevice->getTextureHandle(), infoOnApplicationDevice);
                     }
                     m_images.push_back(std::make_unique<SwapchainImage>(
                         textureOnApplicationDevice, m_bounceBufferOnCompositionDevice, index));
@@ -153,6 +161,10 @@ namespace {
 
                 index++;
             }
+
+            // A fence to be used to synchronize between the application/runtime and the composition device.
+            m_fenceOnCompositionDevice = m_compositionDevice->createFence();
+            m_fenceOnApplicationDevice = m_applicationDevice->openFence(m_fenceOnCompositionDevice->getFenceHandle());
         }
 
         ~SubmittableSwapchain() override {
@@ -177,6 +189,12 @@ namespace {
                 waitInfo.timeout = XR_INFINITE_DURATION;
                 CHECK_XRCMD(xrWaitSwapchainImage(m_swapchain, &waitInfo));
             }
+
+            // Serialize the operations on the application device that might have occurred when acquiring the swapchain
+            // image.
+            m_fenceValue++;
+            m_fenceOnApplicationDevice->signal(m_fenceValue);
+            m_fenceOnCompositionDevice->waitOnDevice(m_fenceValue);
 
             m_acquiredImages.push_back(index);
             return m_images[index].get();
@@ -240,15 +258,15 @@ namespace {
                 return;
             }
 
+            // Serialize the operations on the composition device before copying to the application device or releasing
+            // the swapchain image.
+            m_fenceValue++;
+            m_fenceOnCompositionDevice->signal(m_fenceValue);
+            m_fenceOnApplicationDevice->waitOnDevice(m_fenceValue);
+
             if (m_bounceBufferOnApplicationDevice) {
                 // The swapchain image wasn't shareable and we must perform a copy from a shareable texture written on
                 // the composition device.
-
-                // Serialize the operations on the composition device before copying to the application device.
-                m_fenceValue++;
-                m_fenceOnCompositionDevice->waitOnDevice(m_fenceValue);
-                m_fenceOnApplicationDevice->signal(m_fenceValue);
-
                 m_applicationDevice->copyTexture(m_bounceBufferOnApplicationDevice.get(),
                                                  m_images[m_lastReleasedImage.value()]->getApplicationTexture());
             }
@@ -438,6 +456,11 @@ namespace {
                     m_has_XR_KHR_D3D11_enable = true;
                 }
 #endif
+#ifdef XR_USE_GRAPHICS_API_D3D12
+                if (extensionName == XR_KHR_D3D12_ENABLE_EXTENSION_NAME) {
+                    m_has_XR_KHR_D3D12_enable = true;
+                }
+#endif
             }
         }
 
@@ -451,6 +474,13 @@ namespace {
                 if (m_has_XR_KHR_D3D11_enable && entry->type == XR_TYPE_GRAPHICS_BINDING_D3D11_KHR) {
                     m_applicationDevice =
                         internal::wrapApplicationDevice(*reinterpret_cast<const XrGraphicsBindingD3D11KHR*>(entry));
+                    break;
+                }
+#endif
+#ifdef XR_USE_GRAPHICS_API_D3D12
+                if (m_has_XR_KHR_D3D12_enable && entry->type == XR_TYPE_GRAPHICS_BINDING_D3D12_KHR) {
+                    m_applicationDevice =
+                        internal::wrapApplicationDevice(*reinterpret_cast<const XrGraphicsBindingD3D12KHR*>(entry));
                     break;
                 }
 #endif
@@ -471,8 +501,8 @@ namespace {
                 }
 
                 m_fenceOnCompositionDevice = m_compositionDevice->createFence();
-                m_fenceOnApplicationDevice = m_applicationDevice->openFence(
-                    m_fenceOnCompositionDevice->getFenceHandle());
+                m_fenceOnApplicationDevice =
+                    m_applicationDevice->openFence(m_fenceOnCompositionDevice->getFenceHandle());
 
                 // Get the preferred formats for swapchains.
                 PFN_xrEnumerateSwapchainFormats xrEnumerateSwapchainFormats;
@@ -583,6 +613,9 @@ namespace {
 
 #ifdef XR_USE_GRAPHICS_API_D3D11
         bool m_has_XR_KHR_D3D11_enable{false};
+#endif
+#ifdef XR_USE_GRAPHICS_API_D3D12
+        bool m_has_XR_KHR_D3D12_enable{false};
 #endif
     };
 

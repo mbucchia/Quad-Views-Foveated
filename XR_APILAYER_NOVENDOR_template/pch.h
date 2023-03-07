@@ -25,6 +25,7 @@
 // Uncomment below the graphics frameworks used by the layer.
 
 //#define XR_USE_GRAPHICS_API_D3D11
+//#define XR_USE_GRAPHICS_API_D3D12
 
 // Standard library.
 #include <algorithm>
@@ -59,6 +60,9 @@ using Microsoft::WRL::ComPtr;
 #include <dxgiformat.h>
 #ifdef XR_USE_GRAPHICS_API_D3D11
 #include <d3d11_4.h>
+#endif
+#ifdef XR_USE_GRAPHICS_API_D3D12
+#include <d3d12.h>
 #endif
 
 // OpenXR + Windows-specific definitions.
