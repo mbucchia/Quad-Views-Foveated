@@ -24,6 +24,8 @@
 
 #include "graphics.h"
 
+#if defined(XR_USE_GRAPHICS_API_D3D11) || defined(XR_USE_GRAPHICS_API_D3D12)
+
 namespace {
 
     using namespace openxr_api_layer::utils::graphics;
@@ -629,3 +631,5 @@ namespace openxr_api_layer::utils::graphics {
     }
 
 } // namespace openxr_api_layer::utils::graphics
+
+#endif
