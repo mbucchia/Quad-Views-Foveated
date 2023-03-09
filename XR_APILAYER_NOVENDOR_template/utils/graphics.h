@@ -212,6 +212,7 @@ namespace openxr_api_layer::utils::graphics {
 
         // Will only return a valid handle if the swapchain is submittable.
         virtual XrSwapchain getXrHandle() const = 0;
+        virtual XrSwapchainSubImage getSubImage() const = 0;
     };
 
     // A swapchain image.

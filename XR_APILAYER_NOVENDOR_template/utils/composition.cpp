@@ -297,6 +297,17 @@ namespace {
             return m_swapchain;
         }
 
+        XrSwapchainSubImage getSubImage() const override {
+            XrSwapchainSubImage subImage{};
+            subImage.swapchain = m_swapchain;
+            subImage.imageArrayIndex = 0;
+            subImage.imageRect.offset.x = subImage.imageRect.offset.y = 0;
+            subImage.imageRect.extent.width = m_infoOnCompositionDevice.width;
+            subImage.imageRect.extent.height = m_infoOnCompositionDevice.height;
+            return subImage;
+
+        }
+
         const XrSwapchain m_swapchain;
         const int64_t m_formatOnApplicationDevice;
         IGraphicsDevice* const m_compositionDevice;
@@ -415,6 +426,10 @@ namespace {
         }
 
         XrSwapchain getXrHandle() const override {
+            throw std::runtime_error("Not a submittable swapchain");
+        }
+
+        XrSwapchainSubImage getSubImage() const override {
             throw std::runtime_error("Not a submittable swapchain");
         }
 
