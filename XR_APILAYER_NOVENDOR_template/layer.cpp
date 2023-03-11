@@ -34,9 +34,6 @@ namespace {
     class OpenXrLayer : public openxr_api_layer::OpenXrApi {
       public:
         OpenXrLayer() = default;
-
-        // Corresponds to xrDestroyInstance().
-        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrCreateInstance
         ~OpenXrLayer() = default;
 
         // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrGetInstanceProcAddr
@@ -105,6 +102,13 @@ namespace {
             return XR_SUCCESS;
         }
 
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrDestroyInstance
+        XrResult xrDestroyInstance(XrInstance instance) override {
+            TraceLoggingWrite(g_traceProvider, "xrDestroyInstance", TLXArg(instance, "Instance"));
+
+            return OpenXrApi::xrDestroyInstance(instance);
+        }
+
         // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrGetSystem
         XrResult xrGetSystem(XrInstance instance, const XrSystemGetInfo* getInfo, XrSystemId* systemId) override {
             if (getInfo->type != XR_TYPE_SYSTEM_GET_INFO) {
@@ -151,6 +155,7 @@ namespace {
             const XrResult result = OpenXrApi::xrCreateSession(instance, createInfo, session);
             if (XR_SUCCEEDED(result)) {
                 if (isSystemHandled(createInfo->systemId)) {
+                    // Do some stuff here!
                 }
 
                 TraceLoggingWrite(g_traceProvider, "xrCreateSession", TLXArg(*session, "Session"));
