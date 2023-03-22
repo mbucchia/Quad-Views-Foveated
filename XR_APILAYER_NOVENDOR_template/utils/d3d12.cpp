@@ -377,7 +377,7 @@ namespace {
         }
 
         D3D12ReusableCommandList getCommandList() {
-            std::unique_lock lock(m_commandListPoolLock);
+            std::unique_lock lock(m_commandListPoolMutex);
 
             if (m_availableCommandList.empty()) {
                 // Recycle completed command lists.
@@ -410,7 +410,7 @@ namespace {
         }
 
         void submitCommandList(D3D12ReusableCommandList commandList) {
-            std::unique_lock lock(m_commandListPoolLock);
+            std::unique_lock lock(m_commandListPoolMutex);
 
             CHECK_HRCMD(commandList.commandList->Close());
             m_commandQueue->ExecuteCommandLists(
@@ -423,7 +423,7 @@ namespace {
         const ComPtr<ID3D12Device> m_device;
         const ComPtr<ID3D12CommandQueue> m_commandQueue;
 
-        std::mutex m_commandListPoolLock;
+        std::mutex m_commandListPoolMutex;
         std::deque<D3D12ReusableCommandList> m_availableCommandList;
         std::deque<D3D12ReusableCommandList> m_pendingCommandList;
         ComPtr<ID3D12Fence> m_commandListPoolFence;

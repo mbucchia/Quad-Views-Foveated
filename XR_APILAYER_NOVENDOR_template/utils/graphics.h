@@ -211,7 +211,7 @@ namespace openxr_api_layer::utils::graphics {
         virtual uint32_t getLength() const = 0;
 
         // Will only return a valid handle if the swapchain is submittable.
-        virtual XrSwapchain getXrHandle() const = 0;
+        virtual XrSwapchain getSwapchainHandle() const = 0;
         virtual XrSwapchainSubImage getSubImage() const = 0;
     };
 
@@ -226,18 +226,21 @@ namespace openxr_api_layer::utils::graphics {
         virtual uint32_t getIndex() const = 0;
     };
 
+    // A container for user session data.
+    // This class is meant to be extended by a caller before use with ICompositionFramework::setSessionData() and
+    // ICompositionFramework::getSessionData().
+    struct ICompositionSessionData {
+        virtual ~ICompositionSessionData() = default;
+    };
+
     // A collection of hooks and utilities to perform composition in the layer.
     struct ICompositionFramework {
         virtual ~ICompositionFramework() = default;
 
-        // Must be called after chaining to the upstream xrCreateInstance() implementation.
-        virtual void xrCreateInstance_post(const XrInstanceCreateInfo& info, XrInstance instance) = 0;
+        virtual XrSession getSessionHandle() const = 0;
 
-        // Must be called after chaining to the upstream xrCreateSession() implementation.
-        virtual void xrCreateSession_post(const XrSessionCreateInfo& info, XrSession session) = 0;
-
-        // Must be called before chaining to the upstream xrDestroySession() implementation.
-        virtual void xrDestroySession_pre() = 0;
+        virtual void setSessionData(std::unique_ptr<ICompositionSessionData> sessionData) = 0;
+        virtual ICompositionSessionData* getSessionDataPtr() const = 0;
 
         // Create a swapchain without an XrSwapchain handle.
         virtual std::shared_ptr<ISwapchain> createSwapchain(const XrSwapchainCreateInfo& infoOnApplicationDevice,
@@ -255,10 +258,30 @@ namespace openxr_api_layer::utils::graphics {
         virtual IGraphicsDevice* getApplicationDevice() const = 0;
         virtual int64_t getPreferredSwapchainFormatOnApplicationDevice(XrSwapchainUsageFlags usageFlags,
                                                                        bool preferSRGB = true) const = 0;
+
+        template <typename SessionData>
+        typename SessionData* getSessionData() const {
+            return reinterpret_cast<SessionData*>(getSessionDataPtr());
+        }
     };
 
-    std::shared_ptr<ICompositionFramework> createCompositionFramework(PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr,
-                                                                      CompositionApi compositionApi);
+    // A factory to create composition frameworks for each session.
+    struct ICompositionFrameworkFactory {
+        virtual ~ICompositionFrameworkFactory() = default;
+
+        // Must be called after chaining to the upstream xrGetInstanceProcAddr() implementation.
+        virtual void xrGetInstanceProcAddr_post(XrInstance instance,
+                                                const char* name,
+                                                PFN_xrVoidFunction* function) = 0;
+
+        virtual ICompositionFramework* getCompositionFramework(XrSession session) = 0;
+    };
+
+    std::shared_ptr<ICompositionFrameworkFactory>
+    createCompositionFrameworkFactory(const XrInstanceCreateInfo& info,
+                                      XrInstance instance,
+                                      PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr,
+                                      CompositionApi compositionApi);
 
     namespace internal {
 

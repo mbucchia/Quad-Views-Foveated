@@ -134,7 +134,7 @@ namespace {
             } break;
 #endif
             default:
-                throw std::runtime_error("Api not supported");
+                throw std::runtime_error("Composition graphics API is not supported");
             }
 
             // Make the images available on the composition device.
@@ -293,7 +293,7 @@ namespace {
             return (uint32_t)m_images.size();
         }
 
-        XrSwapchain getXrHandle() const override {
+        XrSwapchain getSwapchainHandle() const override {
             return m_swapchain;
         }
 
@@ -305,7 +305,6 @@ namespace {
             subImage.imageRect.extent.width = m_infoOnCompositionDevice.width;
             subImage.imageRect.extent.height = m_infoOnCompositionDevice.height;
             return subImage;
-
         }
 
         const XrSwapchain m_swapchain;
@@ -425,7 +424,7 @@ namespace {
             return (uint32_t)m_images.size();
         }
 
-        XrSwapchain getXrHandle() const override {
+        XrSwapchain getSwapchainHandle() const override {
             throw std::runtime_error("Not a submittable swapchain");
         }
 
@@ -448,54 +447,50 @@ namespace {
     };
 
     struct CompositionFramework : ICompositionFramework {
-        CompositionFramework(PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr_, CompositionApi compositionApi)
-            : xrGetInstanceProcAddr(xrGetInstanceProcAddr_), m_compositionApi(compositionApi) {
-        }
-
-        ~CompositionFramework() {
-            if (m_fenceOnCompositionDevice) {
-                m_fenceOnCompositionDevice->waitOnCpu(m_fenceValue);
-            }
-        }
-
-        void xrCreateInstance_post(const XrInstanceCreateInfo& info, XrInstance instance) override {
+        CompositionFramework(const XrInstanceCreateInfo& instanceInfo,
+                             XrInstance instance,
+                             PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr_,
+                             const XrSessionCreateInfo& sessionInfo,
+                             XrSession session,
+                             CompositionApi compositionApi)
+            : m_instance(instance), xrGetInstanceProcAddr(xrGetInstanceProcAddr_), m_session(session) {
             CHECK_XRCMD(xrGetInstanceProcAddr(
-                instance, "xrCreateSwapchain", reinterpret_cast<PFN_xrVoidFunction*>(&xrCreateSwapchain)));
+                m_instance, "xrCreateSwapchain", reinterpret_cast<PFN_xrVoidFunction*>(&xrCreateSwapchain)));
 
-            m_instance = instance;
-
-            // Record which application APIs we will be supporting.
-            for (uint32_t i = 0; i < info.enabledExtensionCount; i++) {
-                const std::string_view extensionName(info.enabledExtensionNames[i]);
+            // Detect which graphics bindings to look for.
+#ifdef XR_USE_GRAPHICS_API_D3D11
+            bool has_XR_KHR_D3D11_enable = false;
+#endif
+#ifdef XR_USE_GRAPHICS_API_D3D12
+            bool has_XR_KHR_D3D12_enable = false;
+#endif
+            for (uint32_t i = 0; i < instanceInfo.enabledExtensionCount; i++) {
+                const std::string_view extensionName(instanceInfo.enabledExtensionNames[i]);
 
 #ifdef XR_USE_GRAPHICS_API_D3D11
                 if (extensionName == XR_KHR_D3D11_ENABLE_EXTENSION_NAME) {
-                    m_has_XR_KHR_D3D11_enable = true;
+                    has_XR_KHR_D3D11_enable = true;
                 }
 #endif
 #ifdef XR_USE_GRAPHICS_API_D3D12
                 if (extensionName == XR_KHR_D3D12_ENABLE_EXTENSION_NAME) {
-                    m_has_XR_KHR_D3D12_enable = true;
+                    has_XR_KHR_D3D12_enable = true;
                 }
 #endif
             }
-        }
-
-        void xrCreateSession_post(const XrSessionCreateInfo& info, XrSession session) override {
-            m_session = session;
 
             // Wrap the application device.
-            const XrBaseInStructure* entry = reinterpret_cast<const XrBaseInStructure*>(info.next);
+            const XrBaseInStructure* entry = reinterpret_cast<const XrBaseInStructure*>(sessionInfo.next);
             while (entry && !m_applicationDevice) {
 #ifdef XR_USE_GRAPHICS_API_D3D11
-                if (m_has_XR_KHR_D3D11_enable && entry->type == XR_TYPE_GRAPHICS_BINDING_D3D11_KHR) {
+                if (has_XR_KHR_D3D11_enable && entry->type == XR_TYPE_GRAPHICS_BINDING_D3D11_KHR) {
                     m_applicationDevice =
                         internal::wrapApplicationDevice(*reinterpret_cast<const XrGraphicsBindingD3D11KHR*>(entry));
                     break;
                 }
 #endif
 #ifdef XR_USE_GRAPHICS_API_D3D12
-                if (m_has_XR_KHR_D3D12_enable && entry->type == XR_TYPE_GRAPHICS_BINDING_D3D12_KHR) {
+                if (has_XR_KHR_D3D12_enable && entry->type == XR_TYPE_GRAPHICS_BINDING_D3D12_KHR) {
                     m_applicationDevice =
                         internal::wrapApplicationDevice(*reinterpret_cast<const XrGraphicsBindingD3D12KHR*>(entry));
                     break;
@@ -504,57 +499,67 @@ namespace {
                 entry = entry->next;
             }
 
-            // If the appplication session is supported, create the resources for composition.
-            if (m_applicationDevice) {
-                // Create the device for composition according to the API layer's request.
-                switch (m_compositionApi) {
+            if (!m_applicationDevice) {
+                throw std::runtime_error("Application graphics API is not supported");
+            }
+
+            // Create the device for composition according to the API layer's request.
+            switch (compositionApi) {
 #ifdef XR_USE_GRAPHICS_API_D3D11
-                case CompositionApi::D3D11:
-                    m_compositionDevice = internal::createD3D11CompositionDevice(m_applicationDevice->getAdapterLuid());
-                    break;
+            case CompositionApi::D3D11:
+                m_compositionDevice = internal::createD3D11CompositionDevice(m_applicationDevice->getAdapterLuid());
+                break;
 #endif
-                default:
-                    throw std::runtime_error("Api not supported");
+            default:
+                throw std::runtime_error("Composition graphics API is not supported");
+            }
+
+            m_fenceOnCompositionDevice = m_compositionDevice->createFence();
+            m_fenceOnApplicationDevice = m_applicationDevice->openFence(m_fenceOnCompositionDevice->getFenceHandle());
+
+            // Get the preferred formats for swapchains.
+            PFN_xrEnumerateSwapchainFormats xrEnumerateSwapchainFormats;
+            CHECK_XRCMD(xrGetInstanceProcAddr(m_instance,
+                                              "xrEnumerateSwapchainFormats",
+                                              reinterpret_cast<PFN_xrVoidFunction*>(&xrEnumerateSwapchainFormats)));
+            uint32_t formatsCount;
+            CHECK_XRCMD(xrEnumerateSwapchainFormats(m_session, 0, &formatsCount, nullptr));
+            std::vector<int64_t> formats(formatsCount);
+            CHECK_XRCMD(xrEnumerateSwapchainFormats(m_session, formatsCount, &formatsCount, formats.data()));
+            for (const int64_t formatOnApplicationDevice : formats) {
+                const DXGI_FORMAT format = m_applicationDevice->translateToGenericFormat(formatOnApplicationDevice);
+                const bool isDepth = isDepthFormat(format);
+                const bool isColor = !isDepth;
+                const bool isSRGB = isColor && isSRGBFormat(format);
+
+                if (m_preferredColorFormat == DXGI_FORMAT_UNKNOWN && isColor && !isSRGB) {
+                    m_preferredColorFormat = format;
                 }
-
-                m_fenceOnCompositionDevice = m_compositionDevice->createFence();
-                m_fenceOnApplicationDevice =
-                    m_applicationDevice->openFence(m_fenceOnCompositionDevice->getFenceHandle());
-
-                // Get the preferred formats for swapchains.
-                PFN_xrEnumerateSwapchainFormats xrEnumerateSwapchainFormats;
-                CHECK_XRCMD(xrGetInstanceProcAddr(m_instance,
-                                                  "xrEnumerateSwapchainFormats",
-                                                  reinterpret_cast<PFN_xrVoidFunction*>(&xrEnumerateSwapchainFormats)));
-                uint32_t formatsCount;
-                CHECK_XRCMD(xrEnumerateSwapchainFormats(m_session, 0, &formatsCount, nullptr));
-                std::vector<int64_t> formats(formatsCount);
-                CHECK_XRCMD(xrEnumerateSwapchainFormats(m_session, formatsCount, &formatsCount, formats.data()));
-                for (const int64_t formatOnApplicationDevice : formats) {
-                    const DXGI_FORMAT format = m_applicationDevice->translateToGenericFormat(formatOnApplicationDevice);
-                    const bool isDepth = isDepthFormat(format);
-                    const bool isColor = !isDepth;
-                    const bool isSRGB = isColor && isSRGBFormat(format);
-
-                    if (m_preferredColorFormat == DXGI_FORMAT_UNKNOWN && isColor && !isSRGB) {
-                        m_preferredColorFormat = format;
-                    }
-                    if (m_preferredSRGBColorFormat == DXGI_FORMAT_UNKNOWN && isColor && isSRGB) {
-                        m_preferredSRGBColorFormat = format;
-                    }
-                    if (m_preferredDepthFormat == DXGI_FORMAT_UNKNOWN && isDepth) {
-                        m_preferredDepthFormat = format;
-                    }
+                if (m_preferredSRGBColorFormat == DXGI_FORMAT_UNKNOWN && isColor && isSRGB) {
+                    m_preferredSRGBColorFormat = format;
+                }
+                if (m_preferredDepthFormat == DXGI_FORMAT_UNKNOWN && isDepth) {
+                    m_preferredDepthFormat = format;
                 }
             }
         }
 
-        void xrDestroySession_pre() override {
-            m_fenceOnApplicationDevice.reset();
-            m_fenceOnCompositionDevice.reset();
-            m_applicationDevice.reset();
-            m_compositionDevice.reset();
-            m_session = XR_NULL_HANDLE;
+        ~CompositionFramework() {
+            if (m_fenceOnCompositionDevice) {
+                m_fenceOnCompositionDevice->waitOnCpu(m_fenceValue);
+            }
+        }
+
+        XrSession getSessionHandle() const override {
+            return m_session;
+        }
+
+        void setSessionData(std::unique_ptr<ICompositionSessionData> sessionData) override {
+            m_sessionData = std::move(sessionData);
+        }
+
+        ICompositionSessionData* getSessionDataPtr() const override {
+            return m_sessionData.get();
         }
 
         std::shared_ptr<ISwapchain> createSwapchain(const XrSwapchainCreateInfo& infoOnApplicationDevice,
@@ -576,7 +581,7 @@ namespace {
         }
 
         void serializePreComposition() override {
-            std::unique_lock lock(m_fenceLock);
+            std::unique_lock lock(m_fenceMutex);
 
             m_fenceValue++;
             m_fenceOnApplicationDevice->signal(m_fenceValue);
@@ -584,7 +589,7 @@ namespace {
         }
 
         void serializePostComposition() override {
-            std::unique_lock lock(m_fenceLock);
+            std::unique_lock lock(m_fenceMutex);
 
             m_fenceValue++;
             m_fenceOnCompositionDevice->signal(m_fenceValue);
@@ -610,39 +615,138 @@ namespace {
             return m_applicationDevice->translateFromGenericFormat(format);
         }
 
+        const XrInstance m_instance;
         const PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr;
-        const CompositionApi m_compositionApi;
+        const XrSession m_session;
 
-        PFN_xrCreateSwapchain xrCreateSwapchain{nullptr};
+        std::unique_ptr<ICompositionSessionData> m_sessionData;
 
-        XrInstance m_instance{XR_NULL_HANDLE};
-        XrSession m_session{XR_NULL_HANDLE};
         std::shared_ptr<IGraphicsDevice> m_compositionDevice;
         std::shared_ptr<IGraphicsDevice> m_applicationDevice;
         DXGI_FORMAT m_preferredColorFormat{DXGI_FORMAT_UNKNOWN};
         DXGI_FORMAT m_preferredSRGBColorFormat{DXGI_FORMAT_UNKNOWN};
         DXGI_FORMAT m_preferredDepthFormat{DXGI_FORMAT_UNKNOWN};
 
-        std::mutex m_fenceLock;
+        std::mutex m_fenceMutex;
         std::shared_ptr<IGraphicsFence> m_fenceOnApplicationDevice;
         std::shared_ptr<IGraphicsFence> m_fenceOnCompositionDevice;
         uint64_t m_fenceValue{0};
 
-#ifdef XR_USE_GRAPHICS_API_D3D11
-        bool m_has_XR_KHR_D3D11_enable{false};
-#endif
-#ifdef XR_USE_GRAPHICS_API_D3D12
-        bool m_has_XR_KHR_D3D12_enable{false};
-#endif
+        PFN_xrCreateSwapchain xrCreateSwapchain{nullptr};
+    };
+
+    struct CompositionFrameworkFactory : ICompositionFrameworkFactory {
+        CompositionFrameworkFactory(const XrInstanceCreateInfo& instanceInfo,
+                                    XrInstance instance,
+                                    PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr_,
+                                    CompositionApi compositionApi)
+            : m_instanceInfo(instanceInfo), m_instance(instance), xrGetInstanceProcAddr(xrGetInstanceProcAddr_),
+              m_compositionApi(compositionApi) {
+            {
+                std::unique_lock lock(factoryMutex);
+                if (factory) {
+                    throw std::runtime_error("There can only be one CompositionFramework factory");
+                }
+                factory = this;
+            }
+
+            // Deep-copy the instance extensions strings.
+            m_instanceExtensions.reserve(m_instanceInfo.enabledExtensionCount);
+            for (uint32_t i = 0; i < m_instanceInfo.enabledExtensionCount; i++) {
+                m_instanceExtensions.push_back(m_instanceInfo.enabledExtensionNames[i]);
+                m_instanceExtensionsArray.push_back(m_instanceExtensions.back().c_str());
+            }
+            m_instanceInfo.enabledExtensionNames = m_instanceExtensionsArray.data();
+
+            CHECK_XRCMD(xrGetInstanceProcAddr(
+                instance, "xrCreateSession", reinterpret_cast<PFN_xrVoidFunction*>(&xrCreateSession)));
+            CHECK_XRCMD(xrGetInstanceProcAddr(
+                instance, "xrDestroySession", reinterpret_cast<PFN_xrVoidFunction*>(&xrDestroySession)));
+        }
+
+        void xrGetInstanceProcAddr_post(XrInstance instance, const char* name, PFN_xrVoidFunction* function) override {
+            const std::string_view functionName(name);
+            if (functionName == "xrCreateSession") {
+                *function = reinterpret_cast<PFN_xrVoidFunction>(hookCreateSession);
+            } else if (functionName == "xrCreateSession") {
+                *function = reinterpret_cast<PFN_xrVoidFunction>(hookCreateSession);
+            }
+        }
+
+        ICompositionFramework* getCompositionFramework(XrSession session) override {
+            std::unique_lock lock(m_sessionsMutex);
+
+            auto it = m_sessions.find(session);
+            if (it == m_sessions.end()) {
+                throw std::runtime_error("No session found");
+            }
+
+            return it->second.get();
+        }
+
+        XrResult xrCreateSession_subst(XrInstance instance, const XrSessionCreateInfo* createInfo, XrSession* session) {
+            const XrResult result = xrCreateSession(instance, createInfo, session);
+            if (XR_SUCCEEDED(result)) {
+                std::unique_lock lock(m_sessionsMutex);
+
+                m_sessions.insert_or_assign(
+                    *session,
+                    std::move(std::make_unique<CompositionFramework>(
+                        m_instanceInfo, m_instance, xrGetInstanceProcAddr, *createInfo, *session, m_compositionApi)));
+            }
+            return result;
+        }
+
+        XrResult xrDestroySession_subst(XrSession session) {
+            {
+                std::unique_lock lock(m_sessionsMutex);
+
+                auto it = m_sessions.find(session);
+                if (it != m_sessions.end()) {
+                    m_sessions.erase(it);
+                }
+            }
+            return xrDestroySession(session);
+        }
+
+        const XrInstance m_instance;
+        const PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr;
+        const CompositionApi m_compositionApi;
+        XrInstanceCreateInfo m_instanceInfo;
+        std::vector<std::string> m_instanceExtensions;
+        std::vector<const char*> m_instanceExtensionsArray;
+
+        std::mutex m_sessionsMutex;
+        std::unordered_map<XrSession, std::unique_ptr<CompositionFramework>> m_sessions;
+
+        PFN_xrCreateSession xrCreateSession{nullptr};
+        PFN_xrDestroySession xrDestroySession{nullptr};
+
+        static inline std::mutex factoryMutex;
+        static inline CompositionFrameworkFactory* factory{nullptr};
+
+        static XrResult hookCreateSession(XrInstance instance,
+                                          const XrSessionCreateInfo* createInfo,
+                                          XrSession* session) {
+            return factory->xrCreateSession_subst(instance, createInfo, session);
+        }
+
+        static XrResult hookDestroySession(XrSession session) {
+            return factory->xrDestroySession_subst(session);
+        }
     };
 
 } // namespace
 
 namespace openxr_api_layer::utils::graphics {
 
-    std::shared_ptr<ICompositionFramework> createCompositionFramework(PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr,
-                                                                      CompositionApi compositionApi) {
-        return std::make_shared<CompositionFramework>(xrGetInstanceProcAddr, compositionApi);
+    std::shared_ptr<ICompositionFrameworkFactory>
+    createCompositionFrameworkFactory(const XrInstanceCreateInfo& instanceInfo,
+                                      XrInstance instance,
+                                      PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr,
+                                      CompositionApi compositionApi) {
+        return std::make_shared<CompositionFrameworkFactory>(
+            instanceInfo, instance, xrGetInstanceProcAddr, compositionApi);
     }
 
 } // namespace openxr_api_layer::utils::graphics
