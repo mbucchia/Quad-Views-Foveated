@@ -35,4 +35,10 @@ namespace openxr_api_layer {
     // A function to reset (delete) the singleton.
     void ResetInstance();
 
+    // The path where the DLL is loaded from (eg: to load data files).
+    extern std::filesystem::path dllHome;
+
+    // The path that is writable (eg: to store logs).
+    extern std::filesystem::path localAppData;
+
 } // namespace openxr_api_layer
