@@ -658,18 +658,17 @@ namespace {
             }
             m_instanceInfo.enabledExtensionNames = m_instanceExtensionsArray.data();
 
-            CHECK_XRCMD(xrGetInstanceProcAddr(
-                instance, "xrCreateSession", reinterpret_cast<PFN_xrVoidFunction*>(&xrCreateSession)));
-            CHECK_XRCMD(xrGetInstanceProcAddr(
-                instance, "xrDestroySession", reinterpret_cast<PFN_xrVoidFunction*>(&xrDestroySession)));
+            // xrCreateSession() and xrDestroySession() function pointers are chained.
         }
 
         void xrGetInstanceProcAddr_post(XrInstance instance, const char* name, PFN_xrVoidFunction* function) override {
             const std::string_view functionName(name);
             if (functionName == "xrCreateSession") {
+                xrCreateSession = reinterpret_cast<PFN_xrCreateSession>(*function);
                 *function = reinterpret_cast<PFN_xrVoidFunction>(hookCreateSession);
-            } else if (functionName == "xrCreateSession") {
-                *function = reinterpret_cast<PFN_xrVoidFunction>(hookCreateSession);
+            } else if (functionName == "xrDestroySession") {
+                xrDestroySession = reinterpret_cast<PFN_xrDestroySession>(*function);
+                *function = reinterpret_cast<PFN_xrVoidFunction>(hookDestroySession);
             }
         }
 

@@ -40,8 +40,9 @@ namespace openxr_api_layer::utils::graphics {
 #endif
     };
 
-#ifdef XR_USE_GRAPHICS_API_D3D11
     // Type traits for all graphics APIs.
+
+#ifdef XR_USE_GRAPHICS_API_D3D11
     struct D3D11 {
         static constexpr Api Api = Api::D3D11;
 
@@ -178,15 +179,15 @@ namespace openxr_api_layer::utils::graphics {
     enum class SwapchainMode {
         // The swapchain must be submittable to the upstream xrEndFrame() implementation.
         // A non-submittable swapchain does not have an XrSwapchain handle.
-        Submit = 0,
+        Submit = (1 << 0),
 
         // The swapchain will be accessed for reading during composition in the layer's xrEndFrame() implementation.
         // A readable swapchain might require a copy to the composition device before composition.
-        Read,
+        Read = (1 << 1),
 
         // The swapchain will be access for writing during composition in the layer's xrEndFrame() implementation.
         // A writable swapchain might require a copy from the composition device after composition.
-        Write,
+        Write = (1 << 2),
     };
     DEFINE_ENUM_FLAG_OPERATORS(SwapchainMode);
 
@@ -210,7 +211,7 @@ namespace openxr_api_layer::utils::graphics {
         virtual ISwapchainImage* getImage(uint32_t index) const = 0;
         virtual uint32_t getLength() const = 0;
 
-        // Will only return a valid handle if the swapchain is submittable.
+        // Can only be called if the swapchain is submittable.
         virtual XrSwapchain getSwapchainHandle() const = 0;
         virtual XrSwapchainSubImage getSubImage() const = 0;
     };
