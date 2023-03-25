@@ -35,4 +35,13 @@ namespace openxr_api_layer::utils::general {
 
     std::shared_ptr<ITimer> createTimer();
 
-} // namespace openxr_api_layer::utils::graphics
+    static inline bool startsWith(const std::string& str, const std::string& substr) {
+        return str.find(substr) == 0;
+    }
+
+    static inline bool endsWith(const std::string& str, const std::string& substr) {
+        const auto pos = str.find(substr);
+        return pos != std::string::npos && pos == str.size() - substr.size();
+    }
+
+} // namespace openxr_api_layer::utils::general

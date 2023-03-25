@@ -26,10 +26,32 @@
 
 namespace openxr_api_layer::utils::inputs {
 
+    namespace Hands {
+        constexpr uint32_t Left = 0;
+        constexpr uint32_t Right = 1;
+        constexpr uint32_t Count = 2;
+    }; // namespace Hands
+
     // Input methods to use.
     enum class InputMethod {
+        // Use the motion controller position and aim.
+        MotionControllerSpatial = (1 << 0),
+
+        // Use the motion controller buttons.
+        MotionControllerButtons = (1 << 1),
+
+        // Use the motion controller haptics.
+        MotionControllerHaptics = (1 << 2),
     };
     DEFINE_ENUM_FLAG_OPERATORS(InputMethod);
+
+    // Common denominator of what is supported on all controllers.
+    enum class MotionControllerButton {
+        Select = 0,
+        Menu,
+        Squeeze,
+        ThumbstickClick,
+    };
 
     // A container for user session data.
     // This class is meant to be extended by a caller before use with IInputFramework::setSessionData() and
@@ -38,7 +60,7 @@ namespace openxr_api_layer::utils::inputs {
         virtual ~IInputSessionData() = default;
     };
 
-    // A collection of hooks and utilities to perform Input in the layer.
+    // A collection of hooks and utilities to perform inputs in the layer.
     struct IInputFramework {
         virtual ~IInputFramework() = default;
 
@@ -47,13 +69,26 @@ namespace openxr_api_layer::utils::inputs {
         virtual void setSessionData(std::unique_ptr<IInputSessionData> sessionData) = 0;
         virtual IInputSessionData* getSessionDataPtr() const = 0;
 
+        virtual void blockApplicationInput(bool blocked) = 0;
+
+        // Can only be called if the MotionControllerSpatial input method was requested.
+        virtual XrSpaceLocationFlags locateMotionController(uint32_t side, XrSpace baseSpace, XrPosef& pose) const = 0;
+        virtual XrSpace getMotionControllerSpace(uint32_t side) const = 0;
+
+        // Can only be called if the MotionControllerButtons input method was requested.
+        virtual bool getMotionControllerButtonState(uint32_t side, MotionControllerButton button) const = 0;
+        virtual XrVector2f getMotionControllerThumbstickState(uint32_t side) const = 0;
+
+        // Can only be called if the MotionControllerHaptics input method was requested.
+        virtual void pulseMotionControllerHaptics(uint32_t side, float strength) const = 0;
+
         template <typename SessionData>
         typename SessionData* getSessionData() const {
             return reinterpret_cast<SessionData*>(getSessionDataPtr());
         }
     };
 
-    // A factory to create Input frameworks for each session.
+    // A factory to create input frameworks for each session.
     struct IInputFrameworkFactory {
         virtual ~IInputFrameworkFactory() = default;
 
