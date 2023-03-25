@@ -661,6 +661,12 @@ namespace {
             // xrCreateSession() and xrDestroySession() function pointers are chained.
         }
 
+        ~CompositionFrameworkFactory() override {
+            std::unique_lock lock(factoryMutex);
+
+            factory = nullptr;
+        }
+
         void xrGetInstanceProcAddr_post(XrInstance instance, const char* name, PFN_xrVoidFunction* function) override {
             const std::string_view functionName(name);
             if (functionName == "xrCreateSession") {

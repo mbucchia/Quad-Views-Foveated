@@ -487,6 +487,12 @@ namespace {
                     m_instance, "xrDestroyActionSet", reinterpret_cast<PFN_xrVoidFunction*>(&xrDestroyActionSet)));
                 xrDestroyActionSet(m_frameworkActions.actionSet);
             }
+
+            {
+                std::unique_lock lock(factoryMutex);
+
+                factory = nullptr;
+            }
         }
 
         void xrGetInstanceProcAddr_post(XrInstance instance, const char* name, PFN_xrVoidFunction* function) override {
