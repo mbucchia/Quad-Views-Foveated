@@ -41,6 +41,9 @@
     <ClInclude Include="utils\general.h">
       <Filter>Utilities</Filter>
     </ClInclude>
+    <ClInclude Include="utils\inputs.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -68,6 +71,9 @@
       <Filter>Utilities</Filter>
     </ClCompile>
     <ClCompile Include="utils\d3d12.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="utils\input.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
   </ItemGroup>

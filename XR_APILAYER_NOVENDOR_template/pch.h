@@ -88,3 +88,5 @@ using Microsoft::WRL::ComPtr;
 // Utilities framework.
 #include <utils/graphics.h>
 #endif
+
+#include <utils/inputs.h>
