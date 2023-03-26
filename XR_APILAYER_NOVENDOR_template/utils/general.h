@@ -44,4 +44,7 @@ namespace openxr_api_layer::utils::general {
         return pos != std::string::npos && pos == str.size() - substr.size();
     }
 
+    // Both ray and quadCenter poses must be located using the same base space.
+    bool HitTest(const XrPosef& ray, const XrPosef& quadCenter, const XrExtent2Df& quadSize, XrPosef& hitPose);
+
 } // namespace openxr_api_layer::utils::general

@@ -307,6 +307,7 @@ copy $(SolutionDir)\scripts\Uninstall-Layer32.ps1 $(OutDir)
     <ClCompile Include="utils\composition.cpp" />
     <ClCompile Include="utils\d3d11.cpp" />
     <ClCompile Include="utils\d3d12.cpp" />
+    <ClCompile Include="utils\general.cpp" />
     <ClCompile Include="utils\input.cpp" />
   </ItemGroup>
   <ItemGroup>

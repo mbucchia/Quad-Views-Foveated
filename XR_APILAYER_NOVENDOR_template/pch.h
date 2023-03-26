@@ -74,12 +74,13 @@ using Microsoft::WRL::ComPtr;
 // OpenXR loader interfaces.
 #include <loader_interfaces.h>
 
-// OpenXR utilities.
+// OpenXR/DirectX utilities.
 #include <XrError.h>
 #include <XrMath.h>
 #include <XrSide.h>
 #include <XrStereoView.h>
 #include <XrToString.h>
+#include <DirectXCollision.h>
 
 // FMT formatter.
 #include <fmt/format.h>

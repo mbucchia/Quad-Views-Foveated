@@ -76,6 +76,9 @@
     <ClCompile Include="utils\input.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="utils\general.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="XR_APILAYER_NOVENDOR_template.json" />
