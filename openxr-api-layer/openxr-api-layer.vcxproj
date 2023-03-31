@@ -25,7 +25,7 @@
     <VCProjectVersion>16.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{93d573d0-634f-4ba0-8fe0-fb63d7d00a05}</ProjectGuid>
-    <RootNamespace>XRAPILAYERNOVENDORtemplate</RootNamespace>
+    <RootNamespace>openxrapilayer</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -77,31 +77,31 @@
     <LinkIncremental>true</LinkIncremental>
     <OutDir>$(SolutionDir)\bin\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)\obj\$(Platform)\$(Configuration)\</IntDir>
-    <TargetName>$(ProjectName)</TargetName>
+    <TargetName>$(SolutionName)</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
     <OutDir>$(SolutionDir)\bin\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)\obj\$(Platform)\$(Configuration)\</IntDir>
-    <TargetName>$(ProjectName)-32</TargetName>
+    <TargetName>$(SolutionName)-32</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(SolutionDir)\bin\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)\obj\$(Platform)\$(Configuration)\</IntDir>
-    <TargetName>$(ProjectName)</TargetName>
+    <TargetName>$(SolutionName)</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(SolutionDir)\bin\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)\obj\$(Platform)\$(Configuration)\</IntDir>
-    <TargetName>$(ProjectName)-32</TargetName>
+    <TargetName>$(SolutionName)-32</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>LAYER_NAME="$(SolutionName)";_DEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -118,7 +118,7 @@
       <ModuleDefinitionFile>module.def</ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
-      <Command>copy $(ProjectDir)\$(ProjectName).json $(OutDir)
+      <Command>$(SolutionDir)\scripts\sed.exe "s/XR_APILAYER_name/$(SolutionName)/g" $(ProjectDir)\openxr-api-layer.json &gt; $(OutDir)\openxr-api-layer.json
 copy $(SolutionDir)\scripts\Install-Layer.ps1 $(OutDir)
 copy $(SolutionDir)\scripts\Uninstall-Layer.ps1 $(OutDir)
 </Command>
@@ -145,7 +145,7 @@ copy $(SolutionDir)\scripts\Uninstall-Layer.ps1 $(OutDir)
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>LAYER_NAME="$(SolutionName)";_DEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -162,7 +162,7 @@ copy $(SolutionDir)\scripts\Uninstall-Layer.ps1 $(OutDir)
       <ModuleDefinitionFile>module.def</ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
-      <Command>copy $(ProjectDir)\$(ProjectName)-32.json $(OutDir)
+      <Command>$(SolutionDir)\scripts\sed.exe "s/XR_APILAYER_name/$(SolutionName)/g" $(ProjectDir)\openxr-api-layer-32.json &gt; $(OutDir)\openxr-api-layer-32.json
 copy $(SolutionDir)\scripts\Install-Layer32.ps1 $(OutDir)
 copy $(SolutionDir)\scripts\Uninstall-Layer32.ps1 $(OutDir)
 </Command>
@@ -191,7 +191,7 @@ copy $(SolutionDir)\scripts\Uninstall-Layer32.ps1 $(OutDir)
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>LAYER_NAME="$(SolutionName)";NDEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -210,7 +210,7 @@ copy $(SolutionDir)\scripts\Uninstall-Layer32.ps1 $(OutDir)
       <ModuleDefinitionFile>module.def</ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
-      <Command>copy $(ProjectDir)\$(ProjectName).json $(OutDir)
+      <Command>$(SolutionDir)\scripts\sed.exe "s/XR_APILAYER_name/$(SolutionName)/g" $(ProjectDir)\openxr-api-layer.json &gt; $(OutDir)\openxr-api-layer.json
 copy $(SolutionDir)\scripts\Install-Layer.ps1 $(OutDir)
 copy $(SolutionDir)\scripts\Uninstall-Layer.ps1 $(OutDir)
 </Command>
@@ -239,7 +239,7 @@ copy $(SolutionDir)\scripts\Uninstall-Layer.ps1 $(OutDir)
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>LAYER_NAME="$(SolutionName)";NDEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -258,7 +258,7 @@ copy $(SolutionDir)\scripts\Uninstall-Layer.ps1 $(OutDir)
       <ModuleDefinitionFile>module.def</ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
-      <Command>copy $(ProjectDir)\$(ProjectName)-32.json $(OutDir)
+      <Command>$(SolutionDir)\scripts\sed.exe "s/XR_APILAYER_name/$(SolutionName)/g" $(ProjectDir)\openxr-api-layer-32.json &gt; $(OutDir)\openxr-api-layer-32.json
 copy $(SolutionDir)\scripts\Install-Layer32.ps1 $(OutDir)
 copy $(SolutionDir)\scripts\Uninstall-Layer32.ps1 $(OutDir)
 </Command>
@@ -315,8 +315,8 @@ copy $(SolutionDir)\scripts\Uninstall-Layer32.ps1 $(OutDir)
     <None Include="framework\layer_apis.py" />
     <None Include="module.def" />
     <None Include="packages.config" />
-    <None Include="XR_APILAYER_NOVENDOR_template-32.json" />
-    <None Include="XR_APILAYER_NOVENDOR_template.json">
+    <None Include="openxr-api-layer-32.json" />
+    <None Include="openxr-api-layer.json">
       <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
       <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</DeploymentContent>
       <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</DeploymentContent>

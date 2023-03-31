@@ -81,15 +81,15 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="XR_APILAYER_NOVENDOR_template.json" />
     <None Include="framework\dispatch_generator.py">
       <Filter>Framework</Filter>
     </None>
     <None Include="framework\layer_apis.py">
       <Filter>Framework</Filter>
     </None>
+    <None Include="openxr-api-layer.json" />
+    <None Include="openxr-api-layer-32.json" />
     <None Include="packages.config" />
-    <None Include="XR_APILAYER_NOVENDOR_template-32.json" />
     <None Include="module.def" />
   </ItemGroup>
 </Project>
