@@ -1,6 +1,8 @@
 // MIT License
 //
-// Copyright(c) 2022 Matthieu Bucchianeri
+// Copyright(c) 2022-2023 Matthieu Bucchianeri
+//
+// << insert your own copyright here >>
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this softwareand associated documentation files(the "Software"), to deal
@@ -155,7 +157,7 @@ namespace {
             const XrResult result = OpenXrApi::xrCreateSession(instance, createInfo, session);
             if (XR_SUCCEEDED(result)) {
                 if (isSystemHandled(createInfo->systemId)) {
-                    // Do some stuff here!
+                    // Do something useful here...
                 }
 
                 TraceLoggingWrite(g_traceProvider, "xrCreateSession", TLXArg(*session, "Session"));

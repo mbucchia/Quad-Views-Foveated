@@ -202,7 +202,6 @@ namespace openxr_api_layer::utils::graphics {
         virtual void waitImage() = 0;
         virtual void releaseImage() = 0;
 
-        // Only for manipulating swapchains created through xrCreateSwapchain_post().
         virtual ISwapchainImage* getLastReleasedImage() const = 0;
         virtual void commitLastReleasedImage() = 0;
 

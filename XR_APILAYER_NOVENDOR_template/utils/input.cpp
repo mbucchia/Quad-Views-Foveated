@@ -55,12 +55,10 @@ namespace {
                        const XrSessionCreateInfo& sessionInfo,
                        XrSession session,
                        const FrameworkActions& frameworkActions,
-                       const ForwardDispatch& dispatch,
+                       const ForwardDispatch& forwardDispatch,
                        InputMethod methods)
             : m_instance(instance), xrGetInstanceProcAddr(xrGetInstanceProcAddr_), m_session(session),
-              m_frameworkActions(frameworkActions), xrWaitFrame(dispatch.xrWaitFrame),
-              xrBeginFrame(dispatch.xrBeginFrame), xrAttachSessionActionSets(dispatch.xrAttachSessionActionSets),
-              xrSyncActions(dispatch.xrSyncActions) {
+              m_frameworkActions(frameworkActions), m_forwardDispatch(forwardDispatch) {
             CHECK_XRCMD(xrGetInstanceProcAddr(
                 instance, "xrLocateSpace", reinterpret_cast<PFN_xrVoidFunction*>(&xrLocateSpace)));
             CHECK_XRCMD(xrGetInstanceProcAddr(
@@ -238,7 +236,7 @@ namespace {
         }
 
         XrResult xrWaitFrame_subst(XrSession session, const XrFrameWaitInfo* frameWaitInfo, XrFrameState* frameState) {
-            const XrResult result = xrWaitFrame(session, frameWaitInfo, frameState);
+            const XrResult result = m_forwardDispatch.xrWaitFrame(session, frameWaitInfo, frameState);
             if (XR_SUCCEEDED(result)) {
                 std::unique_lock lock(m_frameMutex);
 
@@ -248,7 +246,7 @@ namespace {
         }
 
         XrResult xrBeginFrame_subst(XrSession session, const XrFrameBeginInfo* frameBeginInfo) {
-            const XrResult result = xrBeginFrame(session, frameBeginInfo);
+            const XrResult result = m_forwardDispatch.xrBeginFrame(session, frameBeginInfo);
             if (XR_SUCCEEDED(result)) {
                 std::unique_lock lock(m_frameMutex);
 
@@ -275,7 +273,7 @@ namespace {
             chainAttachInfo.actionSets = actionSets.data();
             chainAttachInfo.countActionSets = static_cast<uint32_t>(actionSets.size());
 
-            return xrAttachSessionActionSets(session, &chainAttachInfo);
+            return m_forwardDispatch.xrAttachSessionActionSets(session, &chainAttachInfo);
         }
 
         XrResult xrSyncActions_subst(XrSession session, const XrActionsSyncInfo* syncInfo) {
@@ -297,13 +295,14 @@ namespace {
             chainSyncInfo.activeActionSets = activeActionSets.data();
             chainSyncInfo.countActiveActionSets = static_cast<uint32_t>(activeActionSets.size());
 
-            return xrSyncActions(session, &chainSyncInfo);
+            return m_forwardDispatch.xrSyncActions(session, &chainSyncInfo);
         }
 
         const XrInstance m_instance;
         const PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr;
         const XrSession m_session;
         const FrameworkActions m_frameworkActions;
+        const ForwardDispatch& m_forwardDispatch;
 
         std::unique_ptr<IInputSessionData> m_sessionData;
 
