@@ -82,6 +82,7 @@ namespace {
                              IGraphicsDevice* applicationDevice,
                              IGraphicsDevice* compositionDevice,
                              SwapchainMode mode,
+                             std::optional<bool> overrideShareable = {},
                              bool hasOwnership = true)
             : m_swapchain(swapchain), m_infoOnCompositionDevice(infoOnApplicationDevice),
               m_formatOnApplicationDevice(infoOnApplicationDevice.format), m_applicationDevice(applicationDevice),
@@ -142,8 +143,7 @@ namespace {
             // Make the images available on the composition device.
             uint32_t index = 0;
             for (std::shared_ptr<IGraphicsTexture>& textureOnApplicationDevice : textures) {
-                // TODO: Varjo D3D12 support does not seem to truly shareable and requires a quirk.
-                if (textureOnApplicationDevice->isShareable()) {
+                if (overrideShareable.value_or(true) && textureOnApplicationDevice->isShareable()) {
                     const std::shared_ptr<IGraphicsTexture> textureOnCompositionDevice =
                         m_compositionDevice->openTexture(textureOnApplicationDevice->getTextureHandle(),
                                                          m_infoOnCompositionDevice);
@@ -519,6 +519,23 @@ namespace {
             m_fenceOnCompositionDevice = m_compositionDevice->createFence();
             m_fenceOnApplicationDevice = m_applicationDevice->openFence(m_fenceOnCompositionDevice->getFenceHandle());
 
+            // Check for quirks.
+            PFN_xrGetInstanceProperties xrGetInstanceProperties;
+            CHECK_XRCMD(xrGetInstanceProcAddr(m_instance,
+                                              "xrGetInstanceProperties",
+                                              reinterpret_cast<PFN_xrVoidFunction*>(&xrGetInstanceProperties)));
+            XrInstanceProperties instanceProperties{XR_TYPE_INSTANCE_PROPERTIES};
+            CHECK_XRCMD(xrGetInstanceProperties(instance, &instanceProperties));
+            const std::string_view runtimeName(instanceProperties.runtimeName);
+#ifdef XR_USE_GRAPHICS_API_D3D12
+            if (runtimeName.find("Windows Mixed Reality") == std::string::npos &&
+                m_applicationDevice->getApi() == Api::D3D12) {
+                // Quirk: only WMR seems to implement a full D3D12 compositor. Other runtimes seem to use D3D11 and
+                // despite of D3D12 textures having the shareable flag, they are not shareable with D3D11.
+                m_overrideShareable = false;
+            }
+#endif
+
             // Get the preferred formats for swapchains.
             PFN_xrEnumerateSwapchainFormats xrEnumerateSwapchainFormats;
             CHECK_XRCMD(xrGetInstanceProcAddr(m_instance,
@@ -575,7 +592,8 @@ namespace {
                                                               infoOnApplicationDevice,
                                                               m_applicationDevice.get(),
                                                               m_compositionDevice.get(),
-                                                              mode);
+                                                              mode,
+                                                              m_overrideShareable);
             } else {
                 return std::make_shared<NonSubmittableSwapchain>(
                     infoOnApplicationDevice, m_applicationDevice.get(), m_compositionDevice.get(), mode);
@@ -633,6 +651,10 @@ namespace {
         std::shared_ptr<IGraphicsFence> m_fenceOnApplicationDevice;
         std::shared_ptr<IGraphicsFence> m_fenceOnCompositionDevice;
         uint64_t m_fenceValue{0};
+
+#ifdef XR_USE_GRAPHICS_API_D3D12
+        std::optional<bool> m_overrideShareable;
+#endif
 
         PFN_xrCreateSwapchain xrCreateSwapchain{nullptr};
     };
