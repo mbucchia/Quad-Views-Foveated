@@ -23,11 +23,13 @@
 #include "pch.h"
 
 #include "graphics.h"
+#include "log.h"
 
 #if defined(XR_USE_GRAPHICS_API_D3D11) || defined(XR_USE_GRAPHICS_API_D3D12)
 
 namespace {
 
+    using namespace openxr_api_layer::log;
     using namespace openxr_api_layer::utils::graphics;
 
     bool isSRGBFormat(DXGI_FORMAT format) {
@@ -683,7 +685,8 @@ namespace {
 
             auto it = m_sessions.find(session);
             if (it == m_sessions.end()) {
-                throw std::runtime_error("No session found");
+                // The session (likely) could not be handled.
+                return nullptr;
             }
 
             return it->second.get();
@@ -694,10 +697,17 @@ namespace {
             if (XR_SUCCEEDED(result)) {
                 std::unique_lock lock(m_sessionsMutex);
 
-                m_sessions.insert_or_assign(
-                    *session,
-                    std::move(std::make_unique<CompositionFramework>(
-                        m_instanceInfo, m_instance, xrGetInstanceProcAddr, *createInfo, *session, m_compositionApi)));
+                try {
+                    m_sessions.insert_or_assign(*session,
+                                                std::move(std::make_unique<CompositionFramework>(m_instanceInfo,
+                                                                                                 m_instance,
+                                                                                                 xrGetInstanceProcAddr,
+                                                                                                 *createInfo,
+                                                                                                 *session,
+                                                                                                 m_compositionApi)));
+                } catch (std::exception& exc) {
+                    ErrorLog(fmt::format("xrCreateSession: {}\n", exc.what()));
+                }
             }
             return result;
         }
