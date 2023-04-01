@@ -30,7 +30,7 @@ namespace {
 
     // Taken from
     // https://github.com/microsoft/OpenXR-MixedReality/blob/main/samples/SceneUnderstandingUwp/Scene_Placement.cpp
-    bool XM_CALLCONV RayIntersectQuad(DirectX::FXMVECTOR rayPosition,
+    bool XM_CALLCONV rayIntersectQuad(DirectX::FXMVECTOR rayPosition,
                                       DirectX::FXMVECTOR rayDirection,
                                       DirectX::FXMVECTOR v0,
                                       DirectX::FXMVECTOR v1,
@@ -64,7 +64,7 @@ namespace {
 
 namespace openxr_api_layer::utils::general {
 
-    bool HitTest(const XrPosef& ray, const XrPosef& quadCenter, const XrExtent2Df& quadSize, XrPosef& hitPose) {
+    bool hitTest(const XrPosef& ray, const XrPosef& quadCenter, const XrExtent2Df& quadSize, XrPosef& hitPose) {
         using namespace DirectX;
 
         // Taken from
@@ -90,7 +90,28 @@ namespace openxr_api_layer::utils::general {
         XMVECTOR rayDirection = XMVector3Rotate(forward, rotation);
 
         float distance = 0.0f;
-        return RayIntersectQuad(rayPosition, rayDirection, v0, v1, v2, v3, &hitPose, distance);
+        return rayIntersectQuad(rayPosition, rayDirection, v0, v1, v2, v3, &hitPose, distance);
+    }
+
+    // https://gamedev.stackexchange.com/questions/136652/uv-world-mapping-in-shader-with-unity/136720#136720
+    XrVector2f getUVCoordinates(const XrVector3f& point, const XrPosef& quadCenter, const XrExtent2Df& quadSize) {
+        using namespace xr::math;
+
+        const XrVector3f normal =
+            Pose::Multiply(Pose::MakePose(quadCenter.orientation, XrVector3f{}), Pose::Translation({0, 0, 1})).position;
+
+        XrVector3f uDirection, vDirection;
+        vDirection = {0, 0, 1};
+        if (std::abs(normal.y) < 1.0f) {
+            vDirection = Normalize(XrVector3f{0, 1, 0} - normal.y * normal);
+        }
+
+        uDirection = Normalize(Cross(normal, vDirection));
+
+        return {
+            (-Dot(uDirection, point) + (quadSize.width / 2.f)) / quadSize.width,
+            (-Dot(vDirection, point) + (quadSize.height / 2.f)) / quadSize.height,
+        };
     }
 
 } // namespace openxr_api_layer::utils::general

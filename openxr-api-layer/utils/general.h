@@ -22,6 +22,18 @@
 
 #pragma once
 
+namespace xr::math {
+
+    static inline XrVector3f Cross(const XrVector3f& a, const XrVector3f& b) {
+        return {
+            a.y * b.z - a.z * b.y,
+            a.z * b.x - a.x * b.z,
+            a.x * b.y - a.y * b.x,
+        };
+    }
+
+} // namespace xr::math
+
 namespace openxr_api_layer::utils::general {
 
     struct ITimer {
@@ -45,6 +57,16 @@ namespace openxr_api_layer::utils::general {
     }
 
     // Both ray and quadCenter poses must be located using the same base space.
-    bool HitTest(const XrPosef& ray, const XrPosef& quadCenter, const XrExtent2Df& quadSize, XrPosef& hitPose);
+    bool hitTest(const XrPosef& ray, const XrPosef& quadCenter, const XrExtent2Df& quadSize, XrPosef& hitPose);
+
+    // Get UV coordinates for a point on quad.
+    XrVector2f getUVCoordinates(const XrVector3f& point, const XrPosef& quadCenter, const XrExtent2Df& quadSize);
+    static inline POINT getUVCoordinates(const XrVector3f& point,
+                                         const XrPosef& quadCenter,
+                                         const XrExtent2Df& quadSize,
+                                         const XrExtent2Di& quadPixelSize) {
+        const XrVector2f uv = getUVCoordinates(point, quadCenter, quadSize);
+        return {static_cast<LONG>(uv.x * quadPixelSize.width), static_cast<LONG>(uv.y * quadPixelSize.height)};
+    }
 
 } // namespace openxr_api_layer::utils::general
