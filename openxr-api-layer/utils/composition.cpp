@@ -240,12 +240,12 @@ namespace {
                 // the composition device.
                 m_applicationDevice->copyTexture(m_images[m_lastReleasedImage.value()]->getApplicationTexture(),
                                                  m_bounceBufferOnApplicationDevice.get());
-
-                // Serialize the operations on the application device before copying to the composition device.
-                m_fenceValue++;
-                m_fenceOnApplicationDevice->signal(m_fenceValue);
-                m_fenceOnCompositionDevice->waitOnDevice(m_fenceValue);
             }
+
+            // Serialize the operations on the application device before accessing from the composition device.
+            m_fenceValue++;
+            m_fenceOnApplicationDevice->signal(m_fenceValue);
+            m_fenceOnCompositionDevice->waitOnDevice(m_fenceValue);
 
             return m_images[m_lastReleasedImage.value()].get();
         }
