@@ -166,7 +166,7 @@ namespace openxr_api_layer
 		{{
 			result = openxr_api_layer::GetInstance()->{cur_cmd.name}({arguments_list});
 		}}
-		catch (std::exception exc)
+		catch (std::exception& exc)
 		{{
 			TraceLoggingWrite(g_traceProvider, "{cur_cmd.name}_Error", TLArg(exc.what(), "Error"));
 			ErrorLog(fmt::format("{cur_cmd.name}: {{}}\\n", exc.what()));
@@ -191,7 +191,7 @@ namespace openxr_api_layer
 		{{
 			openxr_api_layer::GetInstance()->{cur_cmd.name}({arguments_list});
 		}}
-		catch (std::runtime_error exc)
+		catch (std::exception& exc)
 		{{
 			TraceLoggingWrite(g_traceProvider, "{cur_cmd.name}_Error", TLArg(exc.what(), "Error"));
 			ErrorLog(fmt::format("{cur_cmd.name}: {{}}\\n", exc.what()));

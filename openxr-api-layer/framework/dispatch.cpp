@@ -149,7 +149,7 @@ namespace openxr_api_layer {
             // Forward the xrCreateInstance() call to the layer.
             try {
                 result = openxr_api_layer::GetInstance()->xrCreateInstance(instanceCreateInfo);
-            } catch (std::runtime_error exc) {
+            } catch (std::exception& exc) {
                 TraceLoggingWrite(g_traceProvider, "xrCreateInstance_Error", TLArg(exc.what(), "Error"));
                 ErrorLog(fmt::format("xrCreateInstance: {}\n", exc.what()));
                 result = XR_ERROR_RUNTIME_FAILURE;
@@ -183,7 +183,7 @@ namespace openxr_api_layer {
             if (XR_SUCCEEDED(result)) {
                 openxr_api_layer::ResetInstance();
             }
-        } catch (std::runtime_error exc) {
+        } catch (std::exception& exc) {
             TraceLoggingWrite(g_traceProvider, "xrDestroyInstance_Error", TLArg(exc.what(), "Error"));
             ErrorLog(fmt::format("xrDestroyInstance: {}\n", exc.what()));
             result = XR_ERROR_RUNTIME_FAILURE;
@@ -204,7 +204,7 @@ namespace openxr_api_layer {
         XrResult result;
         try {
             result = openxr_api_layer::GetInstance()->xrGetInstanceProcAddr(instance, name, function);
-        } catch (std::runtime_error exc) {
+        } catch (std::exception& exc) {
             TraceLoggingWrite(g_traceProvider, "xrGetInstanceProcAddr_Error", TLArg(exc.what(), "Error"));
             ErrorLog(fmt::format("xrGetInstanceProcAddr: {}\n", exc.what()));
             result = XR_ERROR_RUNTIME_FAILURE;
