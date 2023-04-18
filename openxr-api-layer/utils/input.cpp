@@ -78,14 +78,19 @@ namespace {
                        const XrSessionCreateInfo& sessionInfo,
                        XrSession session,
                        const FrameworkActions& frameworkActions,
+                       PFN_xrSuggestInteractionProfileBindings xrSuggestInteractionProfileBindings_,
                        const ForwardDispatch& forwardDispatch,
                        InputMethod methods)
             : m_instance(instance), xrGetInstanceProcAddr(xrGetInstanceProcAddr_), m_session(session),
-              m_frameworkActions(frameworkActions), m_forwardDispatch(forwardDispatch) {
+              m_frameworkActions(frameworkActions),
+              xrSuggestInteractionProfileBindings(xrSuggestInteractionProfileBindings_),
+              m_forwardDispatch(forwardDispatch) {
             TraceLocalActivity(local);
             TraceLoggingWriteStart(
                 local, "InputFramework_Create", TLXArg(session, "Session"), TLArg((int)methods, "InputMethods"));
 
+            CHECK_XRCMD(
+                xrGetInstanceProcAddr(instance, "xrPollEvent", reinterpret_cast<PFN_xrVoidFunction*>(&xrPollEvent)));
             CHECK_XRCMD(xrGetInstanceProcAddr(
                 instance, "xrLocateSpace", reinterpret_cast<PFN_xrVoidFunction*>(&xrLocateSpace)));
             CHECK_XRCMD(xrGetInstanceProcAddr(
@@ -95,10 +100,9 @@ namespace {
                                               reinterpret_cast<PFN_xrVoidFunction*>(&xrGetActionStateVector2f)));
             CHECK_XRCMD(xrGetInstanceProcAddr(
                 instance, "xrApplyHapticFeedback", reinterpret_cast<PFN_xrVoidFunction*>(&xrApplyHapticFeedback)));
-
-            PFN_xrStringToPath xrStringToPath;
             CHECK_XRCMD(xrGetInstanceProcAddr(
                 instance, "xrStringToPath", reinterpret_cast<PFN_xrVoidFunction*>(&xrStringToPath)));
+
             CHECK_XRCMD(xrStringToPath(m_instance, "/user/hand/left", &m_sidePath[Hands::Left]));
             CHECK_XRCMD(xrStringToPath(m_instance, "/user/hand/right", &m_sidePath[Hands::Right]));
 
@@ -328,6 +332,10 @@ namespace {
             TraceLoggingWriteStop(local, "InputFramework_PulseMotionControllerHaptics");
         }
 
+        void updateNeedPollEvent(bool needPollEvent) {
+            m_needPollEvent = needPollEvent;
+        }
+
         XrResult xrWaitFrame_subst(XrSession session, const XrFrameWaitInfo* frameWaitInfo, XrFrameState* frameState) {
             TraceLocalActivity(local);
             TraceLoggingWriteStart(local, "InputFramework_WaitFrame", TLXArg(session, "Session"));
@@ -354,6 +362,64 @@ namespace {
             const XrResult result = m_forwardDispatch.xrBeginFrame(session, frameBeginInfo);
             if (XR_SUCCEEDED(result)) {
                 std::unique_lock lock(m_frameMutex);
+
+                // If the application doesn't use motion controller at all, we need to attach our actionset ourselves...
+                if (m_frameworkActions.actionSet != XR_NULL_HANDLE && !m_wasActionSetsAttached) {
+                    TraceLoggingWriteTagged(local, "InputFramework_BeginFrame_SetupFrameworkActionSet");
+
+                    // Make sure our bindings are complete. We only submit suggestions for the interaction profiles in
+                    // the core spec, and hope runtimes do the right thing for implicit remapping.
+                    const char* coreInteractionProfiles[] = {"/interaction_profiles/khr/simple_controller",
+                                                             "/interaction_profiles/htc/vive_controller",
+                                                             "/interaction_profiles/microsoft/motion_controller",
+                                                             "/interaction_profiles/oculus/touch_controller",
+                                                             "/interaction_profiles/valve/index_controller"};
+                    for (const auto& interationProfile : coreInteractionProfiles) {
+                        XrInteractionProfileSuggestedBinding bindings{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+                        CHECK_XRCMD(xrStringToPath(m_instance, interationProfile, &bindings.interactionProfile));
+                        const XrResult suggestResult = xrSuggestInteractionProfileBindings(m_instance, &bindings);
+                        if (XR_FAILED(suggestResult)) {
+                            TraceLoggingWriteTagged(local,
+                                                    "InputFramework_BeginFrame_SuggestInteractionProfileBindings_Error",
+                                                    TLArg(xr::ToString(suggestResult).c_str(), "Result"));
+                            ErrorLog(fmt::format("Could not suggest framework's bindings: {}\n",
+                                                 xr::ToCString(suggestResult)));
+                        }
+                    }
+
+                    XrSessionActionSetsAttachInfo attachInfo{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+                    const XrResult attachResult = xrAttachSessionActionSets_subst(session, &attachInfo);
+                    if (XR_SUCCEEDED(attachResult)) {
+                        // We will also need to do our own synchronization of actions.
+                        m_needSyncActions = true;
+                    } else {
+                        TraceLoggingWriteTagged(local,
+                                                "InputFramework_BeginFrame_AttachSessionActionSets_Error",
+                                                TLArg(xr::ToString(attachResult).c_str(), "Result"));
+                        ErrorLog(fmt::format("Could not attach framework's actionset for session: {}\n",
+                                             xr::ToCString(attachResult)));
+                    }
+                }
+
+                // ...and to synchronize actions ourselves.
+                if (m_needSyncActions) {
+                    // If the application does not poll for events, we need to do it ourselves to avoid the session
+                    // remaining stuck in the non-focused state (which will make xrSyncActions() fail).
+                    if (m_needPollEvent) {
+                        TraceLoggingWriteTagged(local, "InputFramework_BeginFrame_PollEvent");
+
+                        while (true) {
+                            XrEventDataBuffer buf{XR_TYPE_EVENT_DATA_BUFFER};
+                            if (xrPollEvent(m_instance, &buf) != XR_SUCCESS) {
+                                break;
+                            }
+                        }
+                    }
+
+                    TraceLoggingWriteTagged(local, "InputFramework_BeginFrame_SyncFrameworkActions");
+                    XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
+                    CHECK_XRCMD(xrSyncActions_subst(session, &syncInfo));
+                }
 
                 // We keep track of the current frame time in order to query the tracking information for that frame.
                 m_currentFrameTime = m_waitedFrameTime.front();
@@ -385,6 +451,9 @@ namespace {
             chainAttachInfo.countActionSets = static_cast<uint32_t>(actionSets.size());
 
             const XrResult result = m_forwardDispatch.xrAttachSessionActionSets(session, &chainAttachInfo);
+            if (XR_SUCCEEDED(result)) {
+                m_wasActionSetsAttached = true;
+            }
 
             TraceLoggingWriteStop(
                 local, "InputFramework_AttachSessionActionSets", TLArg(xr::ToCString(result), "Result"));
@@ -425,6 +494,7 @@ namespace {
         const PFN_xrGetInstanceProcAddr xrGetInstanceProcAddr;
         const XrSession m_session;
         const FrameworkActions m_frameworkActions;
+        const PFN_xrSuggestInteractionProfileBindings xrSuggestInteractionProfileBindings;
         const ForwardDispatch& m_forwardDispatch;
 
         std::unique_ptr<IInputSessionData> m_sessionData;
@@ -432,15 +502,20 @@ namespace {
         bool m_blockApplicationInputs{false};
         XrPath m_sidePath[Hands::Count]{{XR_NULL_PATH}, {XR_NULL_PATH}};
         XrSpace m_aimActionSpace[Hands::Count]{{XR_NULL_HANDLE}, {XR_NULL_HANDLE}};
+        bool m_wasActionSetsAttached{false};
+        bool m_needSyncActions{false};
+        bool m_needPollEvent;
 
         std::mutex m_frameMutex;
         std::deque<XrTime> m_waitedFrameTime;
         XrTime m_currentFrameTime{0};
 
+        PFN_xrPollEvent xrPollEvent{nullptr};
         PFN_xrLocateSpace xrLocateSpace{nullptr};
         PFN_xrGetActionStateBoolean xrGetActionStateBoolean{nullptr};
         PFN_xrGetActionStateVector2f xrGetActionStateVector2f{nullptr};
         PFN_xrApplyHapticFeedback xrApplyHapticFeedback{nullptr};
+        PFN_xrStringToPath xrStringToPath{nullptr};
     };
 
     struct InputFrameworkFactory : IInputFrameworkFactory {
@@ -634,6 +709,9 @@ namespace {
             } else if (functionName == "xrDestroySession") {
                 xrDestroySession = reinterpret_cast<PFN_xrDestroySession>(*function);
                 *function = reinterpret_cast<PFN_xrVoidFunction>(hookDestroySession);
+            } else if (functionName == "xrPollEvent") {
+                xrPollEvent = reinterpret_cast<PFN_xrPollEvent>(*function);
+                *function = reinterpret_cast<PFN_xrVoidFunction>(hookPollEvent);
             } else if (functionName == "xrSuggestInteractionProfileBindings") {
                 xrSuggestInteractionProfileBindings =
                     reinterpret_cast<PFN_xrSuggestInteractionProfileBindings>(*function);
@@ -652,6 +730,20 @@ namespace {
                 m_forwardDispatch.xrSyncActions = reinterpret_cast<PFN_xrSyncActions>(*function);
                 *function = reinterpret_cast<PFN_xrVoidFunction>(hookSyncActions);
             }
+        }
+
+        XrResult xrPollEvent_subst(XrInstance instance, XrEventDataBuffer* eventData) {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "InputFrameworkFactory_xrPollEvent");
+
+            const XrResult result = xrPollEvent(instance, eventData);
+            if (XR_SUCCEEDED(result)) {
+                m_needPollEvent = false;
+            }
+
+            TraceLoggingWriteStop(local, "InputFrameworkFactory_xrPollEvent", TLArg(xr::ToCString(result), "Result"));
+
+            return result;
         }
 
         IInputFramework* getInputFramework(XrSession session) override {
@@ -673,15 +765,17 @@ namespace {
             if (XR_SUCCEEDED(result)) {
                 std::unique_lock lock(m_sessionsMutex);
 
-                m_sessions.insert_or_assign(*session,
-                                            std::move(std::make_unique<InputFramework>(m_instanceInfo,
-                                                                                       m_instance,
-                                                                                       xrGetInstanceProcAddr,
-                                                                                       *createInfo,
-                                                                                       *session,
-                                                                                       m_frameworkActions,
-                                                                                       m_forwardDispatch,
-                                                                                       m_methods)));
+                m_sessions.insert_or_assign(
+                    *session,
+                    std::move(std::make_unique<InputFramework>(m_instanceInfo,
+                                                               m_instance,
+                                                               xrGetInstanceProcAddr,
+                                                               *createInfo,
+                                                               *session,
+                                                               m_frameworkActions,
+                                                               hookSuggestInteractionProfileBindings,
+                                                               m_forwardDispatch,
+                                                               m_methods)));
             }
 
             TraceLoggingWriteStop(local,
@@ -834,8 +928,9 @@ namespace {
         }
 
         XrResult xrWaitFrame_subst(XrSession session, const XrFrameWaitInfo* frameWaitInfo, XrFrameState* frameState) {
-            return static_cast<InputFramework*>(getInputFramework(session))
-                ->xrWaitFrame_subst(session, frameWaitInfo, frameState);
+            InputFramework* inputFramework = static_cast<InputFramework*>(getInputFramework(session));
+            inputFramework->updateNeedPollEvent(m_needPollEvent);
+            return inputFramework->xrWaitFrame_subst(session, frameWaitInfo, frameState);
         }
 
         XrResult xrBeginFrame_subst(XrSession session, const XrFrameBeginInfo* frameBeginInfo) {
@@ -875,10 +970,12 @@ namespace {
 
         PFN_xrCreateSession xrCreateSession{nullptr};
         PFN_xrDestroySession xrDestroySession{nullptr};
+        PFN_xrPollEvent xrPollEvent{nullptr};
         PFN_xrSuggestInteractionProfileBindings xrSuggestInteractionProfileBindings{nullptr};
         PFN_xrStringToPath xrStringToPath{nullptr};
         PFN_xrPathToString xrPathToString{nullptr};
         ForwardDispatch m_forwardDispatch;
+        bool m_needPollEvent{true};
 
         static inline std::mutex factoryMutex;
         static inline InputFrameworkFactory* factory{nullptr};
@@ -891,6 +988,10 @@ namespace {
 
         static XrResult hookDestroySession(XrSession session) {
             return factory->xrDestroySession_subst(session);
+        }
+
+        static XrResult hookPollEvent(XrInstance instance, XrEventDataBuffer* eventData) {
+            return factory->xrPollEvent_subst(instance, eventData);
         }
 
         static XrResult hookSuggestInteractionProfileBindings(
