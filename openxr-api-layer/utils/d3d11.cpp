@@ -24,6 +24,7 @@
 
 #ifdef XR_USE_GRAPHICS_API_D3D11
 
+#include "log.h"
 #include "graphics.h"
 
 #pragma comment(lib, "dxgi.lib")
@@ -31,12 +32,16 @@
 
 namespace {
 
+    using namespace openxr_api_layer::log;
     using namespace openxr_api_layer::utils::graphics;
 
     constexpr bool PreferNtHandle = false;
 
     struct D3D11Timer : IGraphicsTimer {
         D3D11Timer(ID3D11Device* device) {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "D3D11Timer_Create");
+
             device->GetImmediateContext(m_context.ReleaseAndGetAddressOf());
 
             D3D11_QUERY_DESC queryDesc;
@@ -46,6 +51,14 @@ namespace {
             queryDesc.Query = D3D11_QUERY_TIMESTAMP;
             CHECK_HRCMD(device->CreateQuery(&queryDesc, m_timeStampStart.ReleaseAndGetAddressOf()));
             CHECK_HRCMD(device->CreateQuery(&queryDesc, m_timeStampEnd.ReleaseAndGetAddressOf()));
+
+            TraceLoggingWriteStop(local, "D3D11Timer_Create", TLPArg(this, "Timer"));
+        }
+
+        ~D3D11Timer() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "D3D11Timer_Destroy", TLPArg(this, "Timer"));
+            TraceLoggingWriteStop(local, "D3D11Timer_Destroy");
         }
 
         Api getApi() const override {
@@ -53,17 +66,30 @@ namespace {
         }
 
         void start() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "D3D11Timer_Start", TLPArg(this, "Timer"));
+
             m_context->Begin(m_timeStampDis.Get());
             m_context->End(m_timeStampStart.Get());
+
+            TraceLoggingWriteStop(local, "D3D11Timer_Start");
         }
 
         void stop() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "D3D11Timer_Stop", TLPArg(this, "Timer"));
+
             m_context->End(m_timeStampEnd.Get());
             m_context->End(m_timeStampDis.Get());
             m_valid = true;
+
+            TraceLoggingWriteStop(local, "D3D11Timer_Stop");
         }
 
         uint64_t query() const override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "D3D11Timer_Query", TLPArg(this, "Timer"), TLArg(m_valid, "Valid"));
+
             uint64_t duration = 0;
             if (m_valid) {
                 UINT64 startime = 0, endtime = 0;
@@ -78,6 +104,9 @@ namespace {
                 }
                 m_valid = false;
             }
+
+            TraceLoggingWriteStop(local, "D3D11Timer_Query", TLArg(duration, "Duration"));
+
             return duration;
         }
 
@@ -92,12 +121,24 @@ namespace {
 
     struct D3D11Fence : IGraphicsFence {
         D3D11Fence(ID3D11Fence* fence, bool shareable) : m_fence(fence), m_isShareable(shareable) {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(
+                local, "D3D11Fence_Create", TLPArg(fence, "D3D11Fence"), TLArg(shareable, "Shareable"));
+
             // Query the necessary flavors of device context which will let us use fences.
             ComPtr<ID3D11Device> device;
             m_fence->GetDevice(device.ReleaseAndGetAddressOf());
             ComPtr<ID3D11DeviceContext> context;
             device->GetImmediateContext(context.ReleaseAndGetAddressOf());
             CHECK_HRCMD(context->QueryInterface(m_context.ReleaseAndGetAddressOf()));
+
+            TraceLoggingWriteStop(local, "D3D11Fence_Create", TLPArg(this, "Fence"));
+        }
+
+        ~D3D11Fence() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "D3D11Fence_Destroy", TLPArg(this, "Fence"));
+            TraceLoggingWriteStop(local, "D3D11Fence_Destroy");
         }
 
         Api getApi() const override {
@@ -109,6 +150,9 @@ namespace {
         }
 
         ShareableHandle getFenceHandle() const override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "D3D11Fence_Export", TLPArg(this, "Fence"));
+
             if (!m_isShareable) {
                 throw std::runtime_error("Fence is not shareable");
             }
@@ -117,19 +161,37 @@ namespace {
             CHECK_HRCMD(m_fence->CreateSharedHandle(nullptr, GENERIC_ALL, nullptr, handle.ntHandle.put()));
             handle.isNtHandle = true;
             handle.origin = Api::D3D11;
+
+            TraceLoggingWriteStop(local, "D3D11Fence_Export", TLPArg(handle.ntHandle.get(), "Handle"));
+
             return handle;
         }
 
         void signal(uint64_t value) override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "D3D11Fence_Signal", TLPArg(this, "Fence"), TLArg(value, "Value"));
+
             CHECK_HRCMD(m_context->Signal(m_fence.Get(), value));
             m_context->Flush();
+
+            TraceLoggingWriteStop(local, "D3D11Fence_Signal");
         }
 
         void waitOnDevice(uint64_t value) override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(
+                local, "D3D11Fence_Wait", TLPArg(this, "Fence"), TLArg("Device", "WaitType"), TLArg(value, "Value"));
+
             CHECK_HRCMD(m_context->Wait(m_fence.Get(), value));
+
+            TraceLoggingWriteStop(local, "D3D11Fence_Wait");
         }
 
         void waitOnCpu(uint64_t value) override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(
+                local, "D3D11Fence_Wait", TLPArg(this, "Fence"), TLArg("Host", "WaitType"), TLArg(value, "Value"));
+
             wil::unique_handle eventHandle;
             CHECK_HRCMD(m_context->Signal(m_fence.Get(), value));
             m_context->Flush();
@@ -137,6 +199,8 @@ namespace {
             CHECK_HRCMD(m_fence->SetEventOnCompletion(value, eventHandle.get()));
             WaitForSingleObject(eventHandle.get(), INFINITE);
             ResetEvent(eventHandle.get());
+
+            TraceLoggingWriteStop(local, "D3D11Fence_Wait");
         }
 
         bool isShareable() const override {
@@ -151,9 +215,25 @@ namespace {
 
     struct D3D11Texture : IGraphicsTexture {
         D3D11Texture(ID3D11Texture2D* texture) : m_texture(texture) {
-            // Construct the API-agnostic info descriptor.
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "D3D11Texture_Create", TLPArg(texture, "D3D11Texture"));
+
             D3D11_TEXTURE2D_DESC desc;
             m_texture->GetDesc(&desc);
+            TraceLoggingWriteTagged(local,
+                                    "D3D11Texture_Create",
+                                    TLArg(desc.Width, "Width"),
+                                    TLArg(desc.Height, "Height"),
+                                    TLArg(desc.ArraySize, "ArraySize"),
+                                    TLArg(desc.MipLevels, "MipCount"),
+                                    TLArg(desc.SampleDesc.Count, "SampleCount"),
+                                    TLArg((int)desc.Format, "Format"),
+                                    TLArg((int)desc.Usage, "Usage"),
+                                    TLArg(desc.BindFlags, "BindFlags"),
+                                    TLArg(desc.CPUAccessFlags, "CPUAccessFlags"),
+                                    TLArg(desc.MiscFlags, "MiscFlags"));
+
+            // Construct the API-agnostic info descriptor.
             m_info.format = (int64_t)desc.Format;
             m_info.width = desc.Width;
             m_info.height = desc.Height;
@@ -182,6 +262,18 @@ namespace {
                     m_useNtHandle = true;
                 }
             }
+
+            TraceLoggingWriteStop(local,
+                                  "D3D11Texture_Create",
+                                  TLPArg(this, "Texture"),
+                                  TLArg(m_isShareable, "Shareable"),
+                                  TLArg(m_useNtHandle, "IsNTHandle"));
+        }
+
+        ~D3D11Texture() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "D3D11Texture_Destroy", TLPArg(this, "Texture"));
+            TraceLoggingWriteStop(local, "D3D11Texture_Destroy");
         }
 
         Api getApi() const override {
@@ -193,6 +285,9 @@ namespace {
         }
 
         ShareableHandle getTextureHandle() const override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "D3D11Texture_Export", TLPArg(this, "Texture"));
+
             if (!m_isShareable) {
                 throw std::runtime_error("Texture is not shareable");
             }
@@ -207,6 +302,10 @@ namespace {
             }
             handle.isNtHandle = m_useNtHandle;
             handle.origin = Api::D3D11;
+
+            TraceLoggingWriteStop(
+                local, "D3D11Texture_Export", TLPArg(!m_useNtHandle ? handle.handle : handle.ntHandle.get(), "Handle"));
+
             return handle;
         }
 
@@ -227,9 +326,36 @@ namespace {
 
     struct D3D11GraphicsDevice : IGraphicsDevice {
         D3D11GraphicsDevice(ID3D11Device* device) : m_device(device) {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "D3D11GraphicsDevice_Create", TLPArg(device, "D3D11Device"));
+
+            {
+                ComPtr<IDXGIDevice> dxgiDevice;
+                CHECK_HRCMD(m_device->QueryInterface(IID_PPV_ARGS(dxgiDevice.ReleaseAndGetAddressOf())));
+                ComPtr<IDXGIAdapter> dxgiAdapter;
+                CHECK_HRCMD(dxgiDevice->GetAdapter(dxgiAdapter.ReleaseAndGetAddressOf()));
+                DXGI_ADAPTER_DESC desc;
+                CHECK_HRCMD(dxgiAdapter->GetDesc(&desc));
+                m_adapterLuid = desc.AdapterLuid;
+
+                TraceLoggingWriteTagged(
+                    local,
+                    "D3D11GraphicsDevice_Create",
+                    TLArg(desc.Description, "Adapter"),
+                    TLArg(fmt::format("{}:{}", m_adapterLuid.HighPart, m_adapterLuid.LowPart).c_str(), " Luid"));
+            }
+
             // Query the necessary flavors of device which will let us use fences.
             CHECK_HRCMD(m_device->QueryInterface(m_deviceForFencesAndNtHandles.ReleaseAndGetAddressOf()));
             m_device->GetImmediateContext(m_context.ReleaseAndGetAddressOf());
+
+            TraceLoggingWriteStop(local, "D3D11GraphicsDevice_Create", TLPArg(this, "Device"));
+        }
+
+        ~D3D11GraphicsDevice() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "D3D11GraphicsDevice_Destroy", TLPArg(this, "Device"));
+            TraceLoggingWriteStop(local, "D3D11GraphicsDevice_Destroy");
         }
 
         Api getApi() const override {
@@ -258,6 +384,12 @@ namespace {
         }
 
         std::shared_ptr<IGraphicsFence> openFence(const ShareableHandle& handle) override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local,
+                                   "D3D11Fence_Import",
+                                   TLArg(!handle.isNtHandle ? handle.handle : handle.ntHandle.get(), "Handle"),
+                                   TLArg(handle.isNtHandle, "IsNTHandle"));
+
             if (!handle.isNtHandle) {
                 throw std::runtime_error("Must be NTHANDLE");
             }
@@ -266,7 +398,11 @@ namespace {
             CHECK_HRCMD(m_deviceForFencesAndNtHandles->OpenSharedFence(handle.isNtHandle ? handle.ntHandle.get()
                                                                                          : handle.handle,
                                                                        IID_PPV_ARGS(fence.ReleaseAndGetAddressOf())));
-            return std::make_shared<D3D11Fence>(fence.Get(), false /* shareable */);
+            std::shared_ptr<IGraphicsFence> result = std::make_shared<D3D11Fence>(fence.Get(), false /* shareable */);
+
+            TraceLoggingWriteStop(local, "D3D11Fence_Import", TLPArg(result.get(), "Fence"));
+
+            return result;
         }
 
         std::shared_ptr<IGraphicsTexture> createTexture(const XrSwapchainCreateInfo& info, bool shareable) override {
@@ -302,6 +438,12 @@ namespace {
 
         std::shared_ptr<IGraphicsTexture> openTexture(const ShareableHandle& handle,
                                                       const XrSwapchainCreateInfo& info) override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local,
+                                   "D3D11Texture_Import",
+                                   TLArg(!handle.isNtHandle ? handle.handle : handle.ntHandle.get(), "Handle"),
+                                   TLArg(handle.isNtHandle, "IsNTHandle"));
+
             ComPtr<ID3D11Texture2D> texture;
             if (!handle.isNtHandle) {
                 CHECK_HRCMD(
@@ -310,17 +452,35 @@ namespace {
                 CHECK_HRCMD(m_deviceForFencesAndNtHandles->OpenSharedResource1(
                     handle.ntHandle.get(), IID_PPV_ARGS(texture.ReleaseAndGetAddressOf())));
             }
-            return std::make_shared<D3D11Texture>(texture.Get());
+
+            std::shared_ptr<IGraphicsTexture> result = std::make_shared<D3D11Texture>(texture.Get());
+
+            TraceLoggingWriteStop(local, "D3D11Texture_Import", TLPArg(result.get(), "Texture"));
+
+            return result;
         }
 
         std::shared_ptr<IGraphicsTexture> openTexturePtr(void* nativeTexturePtr,
                                                          const XrSwapchainCreateInfo& info) override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "D3D11Texture_Import", TLPArg(nativeTexturePtr, "D3D11Texture"));
+
             ID3D11Texture2D* texture = reinterpret_cast<ID3D11Texture2D*>(nativeTexturePtr);
-            return std::make_shared<D3D11Texture>(texture);
+
+            std::shared_ptr<IGraphicsTexture> result = std::make_shared<D3D11Texture>(texture);
+
+            TraceLoggingWriteStop(local, "D3D11Texture_Import", TLPArg(result.get(), "Texture"));
+
+            return result;
         }
 
         void copyTexture(IGraphicsTexture* from, IGraphicsTexture* to) override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "D3D11Texture_Copy", TLPArg(from, "Source"), TLPArg(to, "Destination"));
+
             m_context->CopyResource(to->getNativeTexture<D3D11>(), from->getNativeTexture<D3D11>());
+
+            TraceLoggingWriteStop(local, "D3D11Texture_Copy");
         }
 
         GenericFormat translateToGenericFormat(int64_t format) const override {
@@ -332,16 +492,11 @@ namespace {
         }
 
         LUID getAdapterLuid() const override {
-            ComPtr<IDXGIDevice> dxgiDevice;
-            CHECK_HRCMD(m_device->QueryInterface(IID_PPV_ARGS(dxgiDevice.ReleaseAndGetAddressOf())));
-            ComPtr<IDXGIAdapter> dxgiAdapter;
-            CHECK_HRCMD(dxgiDevice->GetAdapter(dxgiAdapter.ReleaseAndGetAddressOf()));
-            DXGI_ADAPTER_DESC desc;
-            CHECK_HRCMD(dxgiAdapter->GetDesc(&desc));
-            return desc.AdapterLuid;
+            return m_adapterLuid;
         }
 
         const ComPtr<ID3D11Device> m_device;
+        LUID m_adapterLuid{};
 
         ComPtr<ID3D11Device5> m_deviceForFencesAndNtHandles;
         ComPtr<ID3D11DeviceContext> m_context;

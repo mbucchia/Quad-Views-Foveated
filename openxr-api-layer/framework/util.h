@@ -47,11 +47,11 @@ namespace xr {
     }
 
     static inline std::string ToString(XrRect2Di rect) {
-        return fmt::format("x:{}, y:{} w:{} h:{}", rect.offset.x, rect.offset.y, rect.extent.width, rect.extent.height);
+        return fmt::format("x:{}, y:{}, w:{}, h:{}", rect.offset.x, rect.offset.y, rect.extent.width, rect.extent.height);
     }
 
     static inline std::string ToString(XrRect2Df rect) {
-        return fmt::format("x:{}, y:{} w:{} h:{}", rect.offset.x, rect.offset.y, rect.extent.width, rect.extent.height);
+        return fmt::format("x:{}, y:{}, w:{}, h:{}", rect.offset.x, rect.offset.y, rect.extent.width, rect.extent.height);
     }
 
 } // namespace xr

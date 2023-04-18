@@ -27,6 +27,38 @@
 
 #if defined(XR_USE_GRAPHICS_API_D3D11) || defined(XR_USE_GRAPHICS_API_D3D12)
 
+namespace xr {
+
+    using namespace openxr_api_layer::utils::graphics;
+
+    static inline std::string ToString(Api api) {
+        switch (api) {
+#ifdef XR_USE_GRAPHICS_API_D3D11
+        case Api::D3D11:
+            return "D3D11";
+#endif
+#ifdef XR_USE_GRAPHICS_API_D3D12
+        case Api::D3D12:
+            return "D3D12";
+#endif
+        };
+
+        return "";
+    }
+
+    static inline std::string ToString(CompositionApi api) {
+        switch (api) {
+#ifdef XR_USE_GRAPHICS_API_D3D11
+        case CompositionApi::D3D11:
+            return "D3D11";
+#endif
+        };
+
+        return "";
+    }
+
+} // namespace xr
+
 namespace {
 
     using namespace openxr_api_layer::log;
@@ -89,6 +121,10 @@ namespace {
               m_compositionDevice(compositionDevice),
               m_accessForRead((mode & SwapchainMode::Read) == SwapchainMode::Read),
               m_accessForWrite((mode & SwapchainMode::Write) == SwapchainMode::Write) {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(
+                local, "Swapchain_Create", TLArg("Submittable", "Type"), TLArg(hasOwnership, "HasOwnership"));
+
             CHECK_XRCMD(xrGetInstanceProcAddr(
                 instance, "xrAcquireSwapchainImage", reinterpret_cast<PFN_xrVoidFunction*>(&xrAcquireSwapchainImage)));
             CHECK_XRCMD(xrGetInstanceProcAddr(
@@ -143,12 +179,13 @@ namespace {
             // Make the images available on the composition device.
             uint32_t index = 0;
             for (std::shared_ptr<IGraphicsTexture>& textureOnApplicationDevice : textures) {
+                std::unique_ptr<SwapchainImage> image;
                 if (overrideShareable.value_or(true) && textureOnApplicationDevice->isShareable()) {
                     const std::shared_ptr<IGraphicsTexture> textureOnCompositionDevice =
                         m_compositionDevice->openTexture(textureOnApplicationDevice->getTextureHandle(),
                                                          m_infoOnCompositionDevice);
-                    m_images.push_back(std::make_unique<SwapchainImage>(
-                        textureOnApplicationDevice, textureOnCompositionDevice, index));
+                    image =
+                        std::make_unique<SwapchainImage>(textureOnApplicationDevice, textureOnCompositionDevice, index);
                 } else {
                     // If the swapchain image isn't shareable, we will need to create a copy accessible on both the
                     // application and composition device, and make sure to perform copy operations as needed.
@@ -159,19 +196,27 @@ namespace {
                         m_bounceBufferOnApplicationDevice = m_applicationDevice->openTexture(
                             m_bounceBufferOnCompositionDevice->getTextureHandle(), infoOnApplicationDevice);
                     }
-                    m_images.push_back(std::make_unique<SwapchainImage>(
-                        textureOnApplicationDevice, m_bounceBufferOnCompositionDevice, index));
+                    image = std::make_unique<SwapchainImage>(
+                        textureOnApplicationDevice, m_bounceBufferOnCompositionDevice, index);
                 }
 
+                TraceLoggingWriteTagged(local, "Swapchain_Create", TLPArg(image.get(), "Image"));
+
+                m_images.push_back(std::move(image));
                 index++;
             }
 
             // A fence to be used to synchronize between the application/runtime and the composition device.
             m_fenceOnCompositionDevice = m_compositionDevice->createFence();
             m_fenceOnApplicationDevice = m_applicationDevice->openFence(m_fenceOnCompositionDevice->getFenceHandle());
+
+            TraceLoggingWriteStop(local, "Swapchain_Create", TLPArg(this, "Swapchain"));
         }
 
         ~SubmittableSwapchain() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "Swapchain_Destroy", TLPArg(this, "Swapchain"));
+
             if (m_fenceOnApplicationDevice) {
                 m_fenceOnApplicationDevice->waitOnCpu(m_fenceValue);
             }
@@ -181,9 +226,14 @@ namespace {
             if (xrDestroySwapchain) {
                 xrDestroySwapchain(m_swapchain);
             }
+
+            TraceLoggingWriteStop(local, "Swapchain_Destroy");
         }
 
         ISwapchainImage* acquireImage(bool wait) override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "Swapchain_AcquireImage", TLPArg(this, "Swapchain"));
+
             std::unique_lock lock(m_mutex);
 
             uint32_t index;
@@ -201,18 +251,32 @@ namespace {
             m_fenceOnCompositionDevice->waitOnDevice(m_fenceValue);
 
             m_acquiredImages.push_back(index);
-            return m_images[index].get();
+
+            ISwapchainImage* const image = m_images[index].get();
+
+            TraceLoggingWriteStop(
+                local, "Swapchain_AcquireImage", TLArg(index, "AcquiredIndex"), TLPArg(image, "Image"));
+
+            return image;
         }
 
         void waitImage() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "Swapchain_WaitImage", TLPArg(this, "Swapchain"));
+
             // We don't need to check that an image was acquired since OpenXR will do it for us and throw an error
             // below.
             XrSwapchainImageWaitInfo waitInfo{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
             waitInfo.timeout = XR_INFINITE_DURATION;
             CHECK_XRCMD(xrWaitSwapchainImage(m_swapchain, &waitInfo));
+
+            TraceLoggingWriteStop(local, "Swapchain_WaitImage");
         }
 
         void releaseImage() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "Swapchain_ReleaseImage", TLPArg(this, "Swapchain"));
+
             std::unique_lock lock(m_mutex);
 
             // We defer release of the OpenXR swapchain to ensure that we will have an opportunity to peek and/or poke
@@ -225,58 +289,73 @@ namespace {
 
             m_lastReleasedImage = m_acquiredImages.front();
             m_acquiredImages.pop_front();
+
+            TraceLoggingWriteStop(local, "Swapchain_ReleaseImage", TLArg(m_lastReleasedImage.value(), "ReleasedIndex"));
         }
 
         ISwapchainImage* getLastReleasedImage() const override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local,
+                                   "Swapchain_GetLastReleasedImage",
+                                   TLPArg(this, "Swapchain"),
+                                   TLArg(m_lastReleasedImage.value_or(-1), "Index"));
+
             if (!m_accessForRead) {
                 throw std::runtime_error("Not a readable swapchain");
             }
 
-            // If the swapchain has no new released image, then there should be no work to do by the caller.
-            if (!m_lastReleasedImage.has_value()) {
-                return nullptr;
+            ISwapchainImage* image = nullptr;
+            if (m_lastReleasedImage.has_value()) {
+                if (m_bounceBufferOnApplicationDevice) {
+                    // The swapchain image wasn't shareable and we must perform a copy to a shareable texture accessible
+                    // on the composition device.
+                    m_applicationDevice->copyTexture(m_images[m_lastReleasedImage.value()]->getApplicationTexture(),
+                                                     m_bounceBufferOnApplicationDevice.get());
+                }
+
+                // Serialize the operations on the application device before accessing from the composition device.
+                m_fenceValue++;
+                m_fenceOnApplicationDevice->signal(m_fenceValue);
+                m_fenceOnCompositionDevice->waitOnDevice(m_fenceValue);
+
+                image = m_images[m_lastReleasedImage.value()].get();
             }
 
-            if (m_bounceBufferOnApplicationDevice) {
-                // The swapchain image wasn't shareable and we must perform a copy to a shareable texture accessible on
-                // the composition device.
-                m_applicationDevice->copyTexture(m_images[m_lastReleasedImage.value()]->getApplicationTexture(),
-                                                 m_bounceBufferOnApplicationDevice.get());
-            }
+            TraceLoggingWriteStop(local, "Swapchain_GetLastReleasedImage", TLPArg(image, "Image"));
 
-            // Serialize the operations on the application device before accessing from the composition device.
-            m_fenceValue++;
-            m_fenceOnApplicationDevice->signal(m_fenceValue);
-            m_fenceOnCompositionDevice->waitOnDevice(m_fenceValue);
-
-            return m_images[m_lastReleasedImage.value()].get();
+            return image;
         }
 
         void commitLastReleasedImage() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local,
+                                   "Swapchain_CommitLastReleasedImage",
+                                   TLPArg(this, "Swapchain"),
+                                   TLArg(m_lastReleasedImage.value_or(-1), "Index"));
+
             if (!m_accessForWrite) {
                 throw std::runtime_error("Not a writable swapchain");
             }
 
-            // If the swapchain has no new released image, then there is no work to commit.
-            if (!m_lastReleasedImage.has_value()) {
-                return;
+            if (m_lastReleasedImage.has_value()) {
+                // Serialize the operations on the composition device before copying to the application device or
+                // releasing the swapchain image.
+                m_fenceValue++;
+                m_fenceOnCompositionDevice->signal(m_fenceValue);
+                m_fenceOnApplicationDevice->waitOnDevice(m_fenceValue);
+
+                if (m_bounceBufferOnApplicationDevice) {
+                    // The swapchain image wasn't shareable and we must perform a copy from a shareable texture written
+                    // on the composition device.
+                    m_applicationDevice->copyTexture(m_bounceBufferOnApplicationDevice.get(),
+                                                     m_images[m_lastReleasedImage.value()]->getApplicationTexture());
+                }
+
+                CHECK_XRCMD(xrReleaseSwapchainImage(m_swapchain, nullptr));
+                m_lastReleasedImage = {};
             }
 
-            // Serialize the operations on the composition device before copying to the application device or releasing
-            // the swapchain image.
-            m_fenceValue++;
-            m_fenceOnCompositionDevice->signal(m_fenceValue);
-            m_fenceOnApplicationDevice->waitOnDevice(m_fenceValue);
-
-            if (m_bounceBufferOnApplicationDevice) {
-                // The swapchain image wasn't shareable and we must perform a copy from a shareable texture written on
-                // the composition device.
-                m_applicationDevice->copyTexture(m_bounceBufferOnApplicationDevice.get(),
-                                                 m_images[m_lastReleasedImage.value()]->getApplicationTexture());
-            }
-
-            CHECK_XRCMD(xrReleaseSwapchainImage(m_swapchain, nullptr));
-            m_lastReleasedImage = {};
+            TraceLoggingWriteStop(local, "Swapchain_CommitLastReleasedImage");
         }
 
         const XrSwapchainCreateInfo& getInfoOnCompositionDevice() const override {
@@ -348,6 +427,9 @@ namespace {
               m_formatOnApplicationDevice(infoOnApplicationDevice.format),
               m_accessForRead((mode & SwapchainMode::Read) == SwapchainMode::Read),
               m_accessForWrite((mode & SwapchainMode::Write) == SwapchainMode::Write) {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "Swapchain_Create", TLArg("Non-Submittable", "Type"));
+
             // Translate from the app device format to the composition device format.
             m_infoOnCompositionDevice.format = compositionDevice->translateFromGenericFormat(
                 applicationDevice->translateToGenericFormat(infoOnApplicationDevice.format));
@@ -360,12 +442,27 @@ namespace {
                     compositionDevice->createTexture(m_infoOnCompositionDevice, true /* shareable */);
                 const std::shared_ptr<IGraphicsTexture> textureOnApplicationDevice = applicationDevice->openTexture(
                     textureOnCompositionDevice->getTextureHandle(), infoOnApplicationDevice);
-                m_images.push_back(
-                    std::make_unique<SwapchainImage>(textureOnApplicationDevice, textureOnCompositionDevice, i));
+                std::unique_ptr<SwapchainImage> image =
+                    std::make_unique<SwapchainImage>(textureOnApplicationDevice, textureOnCompositionDevice, i);
+
+                TraceLoggingWriteTagged(local, "Swapchain_Create", TLPArg(image.get(), "Image"));
+
+                m_images.push_back(std::move(image));
             }
+
+            TraceLoggingWriteStop(local, "Swapchain_Create", TLPArg(this, "Swapchain"));
+        }
+
+        ~NonSubmittableSwapchain() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "Swapchain_Destroy", TLPArg(this, "Swapchain"));
+            TraceLoggingWriteStop(local, "Swapchain_Destroy");
         }
 
         ISwapchainImage* acquireImage(bool wait) override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "Swapchain_AcquireImage", TLPArg(this, "Swapchain"));
+
             std::unique_lock lock(m_mutex);
 
             if (m_acquiredImages.size() == m_images.size()) {
@@ -374,18 +471,32 @@ namespace {
 
             const uint32_t index = m_nextImage++;
             m_acquiredImages.push_back(index);
-            return m_images[index].get();
+
+            ISwapchainImage* const image = m_images[index].get();
+
+            TraceLoggingWriteStop(
+                local, "Swapchain_AcquireImage", TLArg(index, "AcquiredIndex"), TLPArg(image, "Image"));
+
+            return image;
         }
 
         void waitImage() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "Swapchain_WaitImage", TLPArg(this, "Swapchain"));
+
             std::unique_lock lock(m_mutex);
 
             if (m_acquiredImages.empty()) {
                 throw std::runtime_error("No image was acquired");
             }
+
+            TraceLoggingWriteStop(local, "Swapchain_WaitImage");
         }
 
         void releaseImage() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "Swapchain_ReleaseImage", TLPArg(this, "Swapchain"));
+
             std::unique_lock lock(m_mutex);
 
             if (m_acquiredImages.empty()) {
@@ -394,20 +505,40 @@ namespace {
 
             m_lastReleasedImage = m_acquiredImages.front();
             m_acquiredImages.pop_front();
+
+            TraceLoggingWriteStop(local, "Swapchain_ReleaseImage", TLArg(m_lastReleasedImage, "ReleasedIndex"));
         }
 
         ISwapchainImage* getLastReleasedImage() const override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local,
+                                   "Swapchain_GetLastReleasedImage",
+                                   TLPArg(this, "Swapchain"),
+                                   TLArg(m_lastReleasedImage, "Index"));
+
             if (!m_accessForRead) {
                 throw std::runtime_error("Not a readable swapchain");
             }
 
-            return m_images[m_lastReleasedImage].get();
+            ISwapchainImage* const image = m_images[m_lastReleasedImage].get();
+
+            TraceLoggingWriteStop(local, "Swapchain_GetLastReleasedImage", TLPArg(image, "Image"));
+
+            return image;
         }
 
         void commitLastReleasedImage() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local,
+                                   "Swapchain_CommitLastReleasedImage",
+                                   TLPArg(this, "Swapchain"),
+                                   TLArg(m_lastReleasedImage, "Index"));
+
             if (!m_accessForWrite) {
                 throw std::runtime_error("Not a writable swapchain");
             }
+
+            TraceLoggingWriteStop(local, "Swapchain_CommitLastReleasedImage");
         }
 
         const XrSwapchainCreateInfo& getInfoOnCompositionDevice() const override {
@@ -456,6 +587,9 @@ namespace {
                              XrSession session,
                              CompositionApi compositionApi)
             : m_instance(instance), xrGetInstanceProcAddr(xrGetInstanceProcAddr_), m_session(session) {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "CompositionFramework_Create", TLXArg(session, "Session"));
+
             CHECK_XRCMD(xrGetInstanceProcAddr(
                 m_instance, "xrCreateSwapchain", reinterpret_cast<PFN_xrVoidFunction*>(&xrCreateSwapchain)));
 
@@ -561,12 +695,24 @@ namespace {
                     m_preferredDepthFormat = format;
                 }
             }
+            TraceLoggingWriteTagged(local,
+                                    "CompositionFramework_Create",
+                                    TLArg((int64_t)m_preferredColorFormat, "PreferredColorFormat"),
+                                    TLArg((int64_t)m_preferredSRGBColorFormat, "PreferredSRGBColorFormat"),
+                                    TLArg((int64_t)m_preferredDepthFormat, "PreferredDepthFormat"));
+
+            TraceLoggingWriteStop(local, "CompositionFramework_Create", TLXArg(this, "CompositionFramework"));
         }
 
         ~CompositionFramework() {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "CompositionFramework_Destroy", TLXArg(m_session, "Session"));
+
             if (m_fenceOnCompositionDevice) {
                 m_fenceOnCompositionDevice->waitOnCpu(m_fenceValue);
             }
+
+            TraceLoggingWriteStop(local, "CompositionFramework_Destroy");
         }
 
         XrSession getSessionHandle() const override {
@@ -574,7 +720,15 @@ namespace {
         }
 
         void setSessionData(std::unique_ptr<ICompositionSessionData> sessionData) override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local,
+                                   "CompositionFramework_SetSessionData",
+                                   TLXArg(m_session, "Session"),
+                                   TLPArg(sessionData.get(), "SessionData"));
+
             m_sessionData = std::move(sessionData);
+
+            TraceLoggingWriteStop(local, "CompositionFramework_SetSessionData");
         }
 
         ICompositionSessionData* getSessionDataPtr() const override {
@@ -583,37 +737,68 @@ namespace {
 
         std::shared_ptr<ISwapchain> createSwapchain(const XrSwapchainCreateInfo& infoOnApplicationDevice,
                                                     SwapchainMode mode) override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local,
+                                   "CompositionFramework_CreateSwapchain",
+                                   TLXArg(m_session, "Session"),
+                                   TLArg(infoOnApplicationDevice.arraySize, "ArraySize"),
+                                   TLArg(infoOnApplicationDevice.width, "Width"),
+                                   TLArg(infoOnApplicationDevice.height, "Height"),
+                                   TLArg(infoOnApplicationDevice.createFlags, "CreateFlags"),
+                                   TLArg(infoOnApplicationDevice.format, "Format"),
+                                   TLArg(infoOnApplicationDevice.faceCount, "FaceCount"),
+                                   TLArg(infoOnApplicationDevice.mipCount, "MipCount"),
+                                   TLArg(infoOnApplicationDevice.sampleCount, "SampleCount"),
+                                   TLArg(infoOnApplicationDevice.usageFlags, "UsageFlags"),
+                                   TLArg((int)mode, "Mode"));
+
+            std::shared_ptr<ISwapchain> result;
             if ((mode & SwapchainMode::Submit) == SwapchainMode::Submit) {
                 XrSwapchain swapchain;
                 CHECK_XRCMD(xrCreateSwapchain(m_session, &infoOnApplicationDevice, &swapchain));
-                return std::make_shared<SubmittableSwapchain>(xrGetInstanceProcAddr,
-                                                              m_instance,
-                                                              swapchain,
-                                                              infoOnApplicationDevice,
-                                                              m_applicationDevice.get(),
-                                                              m_compositionDevice.get(),
-                                                              mode,
-                                                              m_overrideShareable);
+                result = std::make_shared<SubmittableSwapchain>(xrGetInstanceProcAddr,
+                                                                m_instance,
+                                                                swapchain,
+                                                                infoOnApplicationDevice,
+                                                                m_applicationDevice.get(),
+                                                                m_compositionDevice.get(),
+                                                                mode,
+                                                                m_overrideShareable);
             } else {
-                return std::make_shared<NonSubmittableSwapchain>(
+                result = std::make_shared<NonSubmittableSwapchain>(
                     infoOnApplicationDevice, m_applicationDevice.get(), m_compositionDevice.get(), mode);
             }
+
+            TraceLoggingWriteStop(local, "CompositionFramework_CreateSwapchain", TLPArg(result.get(), "Swapchain"));
+
+            return result;
         }
 
         void serializePreComposition() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "CompositionFramework_SerializePreComposition", TLXArg(m_session, "Session"));
+
             std::unique_lock lock(m_fenceMutex);
 
             m_fenceValue++;
             m_fenceOnApplicationDevice->signal(m_fenceValue);
             m_fenceOnCompositionDevice->waitOnDevice(m_fenceValue);
+
+            TraceLoggingWriteStop(local, "CompositionFramework_SerializePreComposition");
         }
 
         void serializePostComposition() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(
+                local, "CompositionFramework_SerializePostComposition", TLXArg(m_session, "Session"));
+
             std::unique_lock lock(m_fenceMutex);
 
             m_fenceValue++;
             m_fenceOnCompositionDevice->signal(m_fenceValue);
             m_fenceOnApplicationDevice->waitOnDevice(m_fenceValue);
+
+            TraceLoggingWriteStop(local, "CompositionFramework_SerializePostComposition");
         }
 
         IGraphicsDevice* getCompositionDevice() const override {
@@ -666,6 +851,11 @@ namespace {
                                     CompositionApi compositionApi)
             : m_instanceInfo(instanceInfo), m_instance(instance), xrGetInstanceProcAddr(xrGetInstanceProcAddr_),
               m_compositionApi(compositionApi) {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local,
+                                   "CompositionFrameworkFactory_Create",
+                                   TLArg(xr::ToString(compositionApi).c_str(), "CompositionApi"));
+
             {
                 std::unique_lock lock(factoryMutex);
                 if (factory) {
@@ -683,12 +873,20 @@ namespace {
             m_instanceInfo.enabledExtensionNames = m_instanceExtensionsArray.data();
 
             // xrCreateSession() and xrDestroySession() function pointers are chained.
+
+            TraceLoggingWriteStop(
+                local, "CompositionFrameworkFactory_Create", TLPArg(this, "CompositionFrameworkFactory"));
         }
 
         ~CompositionFrameworkFactory() override {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "CompositionFrameworkFactory_Destroy");
+
             std::unique_lock lock(factoryMutex);
 
             factory = nullptr;
+
+            TraceLoggingWriteStop(local, "CompositionFrameworkFactory_Destroy");
         }
 
         void xrGetInstanceProcAddr_post(XrInstance instance, const char* name, PFN_xrVoidFunction* function) override {
@@ -715,6 +913,9 @@ namespace {
         }
 
         XrResult xrCreateSession_subst(XrInstance instance, const XrSessionCreateInfo* createInfo, XrSession* session) {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "CompositionFrameworkFactory_CreateSession");
+
             const XrResult result = xrCreateSession(instance, createInfo, session);
             if (XR_SUCCEEDED(result)) {
                 std::unique_lock lock(m_sessionsMutex);
@@ -728,13 +929,24 @@ namespace {
                                                                                                  *session,
                                                                                                  m_compositionApi)));
                 } catch (std::exception& exc) {
+                    TraceLoggingWriteTagged(
+                        local, "CompositionFrameworkFactory_CreateSession_Error", TLArg(exc.what(), "Error"));
                     ErrorLog(fmt::format("xrCreateSession: {}\n", exc.what()));
                 }
             }
+
+            TraceLoggingWriteStop(local,
+                                  "CompositionFrameworkFactory_CreateSession",
+                                  TLArg(xr::ToCString(result), "Result"),
+                                  TLXArg(*session, "Session"));
+
             return result;
         }
 
         XrResult xrDestroySession_subst(XrSession session) {
+            TraceLocalActivity(local);
+            TraceLoggingWriteStart(local, "CompositionFrameworkFactory_DestroySession", TLXArg(session, "Session"));
+
             {
                 std::unique_lock lock(m_sessionsMutex);
 
@@ -743,7 +955,12 @@ namespace {
                     m_sessions.erase(it);
                 }
             }
-            return xrDestroySession(session);
+            const XrResult result = xrDestroySession(session);
+
+            TraceLoggingWriteStop(
+                local, "CompositionFrameworkFactory_DestroySession", TLArg(xr::ToCString(result), "Result"));
+
+            return result;
         }
 
         const XrInstance m_instance;
