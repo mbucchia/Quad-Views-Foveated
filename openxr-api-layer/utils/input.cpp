@@ -93,11 +93,12 @@ namespace {
 
         ~InputFramework() override {
             PFN_xrDestroySpace xrDestroySpace;
-            CHECK_XRCMD(xrGetInstanceProcAddr(
-                m_instance, "xrDestroySpace", reinterpret_cast<PFN_xrVoidFunction*>(&xrDestroySpace)));
-            for (uint32_t side = 0; side < Hands::Count; side++) {
-                if (m_aimActionSpace[side] != XR_NULL_HANDLE) {
-                    xrDestroySpace(m_aimActionSpace[side]);
+            if (XR_SUCCEEDED(xrGetInstanceProcAddr(
+                    m_instance, "xrDestroySpace", reinterpret_cast<PFN_xrVoidFunction*>(&xrDestroySpace)))) {
+                for (uint32_t side = 0; side < Hands::Count; side++) {
+                    if (m_aimActionSpace[side] != XR_NULL_HANDLE) {
+                        xrDestroySpace(m_aimActionSpace[side]);
+                    }
                 }
             }
         }
@@ -456,35 +457,38 @@ namespace {
 
         ~InputFrameworkFactory() override {
             PFN_xrDestroyAction xrDestroyAction;
-            CHECK_XRCMD(xrGetInstanceProcAddr(
-                m_instance, "xrDestroyAction", reinterpret_cast<PFN_xrVoidFunction*>(&xrDestroyAction)));
-            if (m_frameworkActions.aimAction != XR_NULL_HANDLE) {
-                xrDestroyAction(m_frameworkActions.aimAction);
-            }
-            if (m_frameworkActions.selectAction != XR_NULL_HANDLE) {
-                xrDestroyAction(m_frameworkActions.selectAction);
-            }
-            if (m_frameworkActions.menuAction != XR_NULL_HANDLE) {
-                xrDestroyAction(m_frameworkActions.menuAction);
-            }
-            if (m_frameworkActions.squeezeAction != XR_NULL_HANDLE) {
-                xrDestroyAction(m_frameworkActions.squeezeAction);
-            }
-            if (m_frameworkActions.thumbstickClickAction != XR_NULL_HANDLE) {
-                xrDestroyAction(m_frameworkActions.thumbstickClickAction);
-            }
-            if (m_frameworkActions.thumbstickPositionAction != XR_NULL_HANDLE) {
-                xrDestroyAction(m_frameworkActions.thumbstickPositionAction);
-            }
-            if (m_frameworkActions.hapticAction != XR_NULL_HANDLE) {
-                xrDestroyAction(m_frameworkActions.hapticAction);
+            if (XR_SUCCEEDED(xrGetInstanceProcAddr(
+                    m_instance, "xrDestroyAction", reinterpret_cast<PFN_xrVoidFunction*>(&xrDestroyAction)))) {
+                if (m_frameworkActions.aimAction != XR_NULL_HANDLE) {
+                    xrDestroyAction(m_frameworkActions.aimAction);
+                }
+                if (m_frameworkActions.selectAction != XR_NULL_HANDLE) {
+                    xrDestroyAction(m_frameworkActions.selectAction);
+                }
+                if (m_frameworkActions.menuAction != XR_NULL_HANDLE) {
+                    xrDestroyAction(m_frameworkActions.menuAction);
+                }
+                if (m_frameworkActions.squeezeAction != XR_NULL_HANDLE) {
+                    xrDestroyAction(m_frameworkActions.squeezeAction);
+                }
+                if (m_frameworkActions.thumbstickClickAction != XR_NULL_HANDLE) {
+                    xrDestroyAction(m_frameworkActions.thumbstickClickAction);
+                }
+                if (m_frameworkActions.thumbstickPositionAction != XR_NULL_HANDLE) {
+                    xrDestroyAction(m_frameworkActions.thumbstickPositionAction);
+                }
+                if (m_frameworkActions.hapticAction != XR_NULL_HANDLE) {
+                    xrDestroyAction(m_frameworkActions.hapticAction);
+                }
             }
 
             if (m_frameworkActions.actionSet != XR_NULL_HANDLE) {
                 PFN_xrDestroyActionSet xrDestroyActionSet;
-                CHECK_XRCMD(xrGetInstanceProcAddr(
-                    m_instance, "xrDestroyActionSet", reinterpret_cast<PFN_xrVoidFunction*>(&xrDestroyActionSet)));
-                xrDestroyActionSet(m_frameworkActions.actionSet);
+                if (XR_SUCCEEDED(xrGetInstanceProcAddr(m_instance,
+                                                       "xrDestroyActionSet",
+                                                       reinterpret_cast<PFN_xrVoidFunction*>(&xrDestroyActionSet)))) {
+                    xrDestroyActionSet(m_frameworkActions.actionSet);
+                }
             }
 
             {
