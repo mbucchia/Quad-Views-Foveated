@@ -621,11 +621,9 @@ namespace {
                 if (startsWith(path, "left/")) {
                     CHECK_XRCMD(
                         xrStringToPath(m_instance, ("/user/hand/left" + path.substr(4)).c_str(), &leftActionPath));
-                    updatedBindings.push_back({action, leftActionPath});
                 } else if (startsWith(path, "right/")) {
                     CHECK_XRCMD(
                         xrStringToPath(m_instance, ("/user/hand/right" + path.substr(5)).c_str(), &rightActionPath));
-                    updatedBindings.push_back({action, rightActionPath});
                 } else {
                     CHECK_XRCMD(xrStringToPath(m_instance, ("/user/hand/left" + path).c_str(), &leftActionPath));
                     CHECK_XRCMD(xrStringToPath(m_instance, ("/user/hand/right" + path).c_str(), &rightActionPath));
