@@ -323,7 +323,7 @@ namespace openxr_api_layer
 			m_instance = instance;
 		}
 
-		void SetGrantedExtensions(std::vector<std::string>& grantedExtensions)
+		void SetGrantedExtensions(const std::vector<std::string>& grantedExtensions)
 		{
 			m_grantedExtensions = grantedExtensions;
 		}

@@ -28,11 +28,15 @@
 #include <log.h>
 #include <util.h>
 
-namespace {
+namespace openxr_api_layer {
 
-    using namespace openxr_api_layer;
-    using namespace openxr_api_layer::log;
+    using namespace log;
 
+    // Initialize these vectors with arrays of extensions to block and implicitly request for the instance.
+    const std::vector<std::string> blockedExtensions = {};
+    const std::vector<std::string> implicitExtensions = {};
+
+    // This class implements our API layer.
     class OpenXrLayer : public openxr_api_layer::OpenXrApi {
       public:
         OpenXrLayer() = default;
@@ -167,10 +171,6 @@ namespace {
         bool m_bypassApiLayer{false};
         XrSystemId m_systemId{XR_NULL_SYSTEM_ID};
     };
-
-} // namespace
-
-namespace openxr_api_layer {
 
     // This method is required by the framework to instantiate your OpenXrApi implementation.
     OpenXrApi* GetInstance() {

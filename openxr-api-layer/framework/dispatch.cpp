@@ -59,16 +59,13 @@ namespace openxr_api_layer {
             }
         }
 
-        // The list of extensions to remove or implicitly add.
-        std::vector<std::string> blockedExtensions;
-        std::vector<std::string> implicitExtensions;
-
         // Only request implicit extensions that are supported.
         //
         // While the OpenXR standard states that xrEnumerateInstanceExtensionProperties() can be queried without an
         // instance, this does not stand for API layers, since API layers implementation might rely on the next
         // xrGetInstanceProcAddr() pointer, which is not (yet) populated if no instance is created.
         // We create a dummy instance in order to do these checks.
+        std::vector<std::string> filteredImplicitExtensions;
         if (!implicitExtensions.empty()) {
             XrInstance dummyInstance = XR_NULL_HANDLE;
 
@@ -99,15 +96,14 @@ namespace openxr_api_layer {
             CHECK_XRCMD(
                 xrEnumerateInstanceExtensionProperties(nullptr, extensionsCount, &extensionsCount, extensions.data()));
 
-            for (auto it = implicitExtensions.begin(); it != implicitExtensions.end();) {
+            for (const std::string& extensionName : implicitExtensions) {
                 const auto matchExtensionName = [&](const XrExtensionProperties& properties) {
-                    return properties.extensionName == *it;
+                    return properties.extensionName == extensionName;
                 };
                 if (std::find_if(extensions.cbegin(), extensions.cend(), matchExtensionName) != extensions.cend()) {
-                    it = ++it;
+                    filteredImplicitExtensions.push_back(extensionName);
                 } else {
-                    Log(fmt::format("Cannot satisfy implicit extension request: {}\n", *it));
-                    it = implicitExtensions.erase(it);
+                    Log(fmt::format("Cannot satisfy implicit extension request: {}\n", extensionName));
                 }
             }
 
@@ -128,7 +124,7 @@ namespace openxr_api_layer {
                 Log(fmt::format("Blocking extension: {}\n", ext));
             }
         }
-        for (const auto& ext : implicitExtensions) {
+        for (const auto& ext : filteredImplicitExtensions) {
             Log(fmt::format("Requesting extension: {}\n", ext));
             newEnabledExtensionNames.push_back(ext.c_str());
         }
@@ -144,7 +140,7 @@ namespace openxr_api_layer {
             // Create our layer.
             openxr_api_layer::GetInstance()->SetGetInstanceProcAddr(apiLayerInfo->nextInfo->nextGetInstanceProcAddr,
                                                                     *instance);
-            openxr_api_layer::GetInstance()->SetGrantedExtensions(implicitExtensions);
+            openxr_api_layer::GetInstance()->SetGrantedExtensions(filteredImplicitExtensions);
 
             // Forward the xrCreateInstance() call to the layer.
             try {
