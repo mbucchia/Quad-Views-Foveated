@@ -65,6 +65,10 @@ namespace openxr_api_layer {
                 return XR_ERROR_VALIDATION_FAILURE;
             }
 
+            // Needed to resolve the requested function pointers.
+            OpenXrApi::xrCreateInstance(createInfo);
+
+            // Dump the application name, OpenXR runtime information and other useful things for debugging.
             TraceLoggingWrite(g_traceProvider,
                               "xrCreateInstance",
                               TLArg(xr::ToString(createInfo->applicationInfo.apiVersion).c_str(), "ApiVersion"),
@@ -92,10 +96,6 @@ namespace openxr_api_layer {
                     g_traceProvider, "xrCreateInstance", TLArg(createInfo->enabledExtensionNames[i], "ExtensionName"));
             }
 
-            // Needed to resolve the requested function pointers.
-            OpenXrApi::xrCreateInstance(createInfo);
-
-            // Dump the application name and OpenXR runtime information to help debugging issues.
             XrInstanceProperties instanceProperties = {XR_TYPE_INSTANCE_PROPERTIES};
             CHECK_XRCMD(OpenXrApi::xrGetInstanceProperties(GetXrInstance(), &instanceProperties));
             const auto runtimeName = fmt::format("{} {}.{}.{}",
