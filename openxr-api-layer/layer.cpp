@@ -104,13 +104,6 @@ namespace {
             return XR_SUCCESS;
         }
 
-        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrDestroyInstance
-        XrResult xrDestroyInstance(XrInstance instance) override {
-            TraceLoggingWrite(g_traceProvider, "xrDestroyInstance", TLXArg(instance, "Instance"));
-
-            return OpenXrApi::xrDestroyInstance(instance);
-        }
-
         // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrGetSystem
         XrResult xrGetSystem(XrInstance instance, const XrSystemGetInfo* getInfo, XrSystemId* systemId) override {
             if (getInfo->type != XR_TYPE_SYSTEM_GET_INFO) {
@@ -175,20 +168,16 @@ namespace {
         XrSystemId m_systemId{XR_NULL_SYSTEM_ID};
     };
 
-    std::unique_ptr<OpenXrLayer> g_instance = nullptr;
-
 } // namespace
 
 namespace openxr_api_layer {
+
+    // This method is required by the framework to instantiate your OpenXrApi implementation.
     OpenXrApi* GetInstance() {
         if (!g_instance) {
             g_instance = std::make_unique<OpenXrLayer>();
         }
         return g_instance.get();
-    }
-
-    void ResetInstance() {
-        g_instance.reset();
     }
 
 } // namespace openxr_api_layer

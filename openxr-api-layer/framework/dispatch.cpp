@@ -173,30 +173,6 @@ namespace openxr_api_layer {
         return result;
     }
 
-    // Handle cleanup of the layer's singleton.
-    XrResult XRAPI_CALL xrDestroyInstance(XrInstance instance) {
-        TraceLoggingWrite(g_traceProvider, "xrDestroyInstance");
-
-        XrResult result;
-        try {
-            result = openxr_api_layer::GetInstance()->xrDestroyInstance(instance);
-            if (XR_SUCCEEDED(result)) {
-                openxr_api_layer::ResetInstance();
-            }
-        } catch (std::exception& exc) {
-            TraceLoggingWrite(g_traceProvider, "xrDestroyInstance_Error", TLArg(exc.what(), "Error"));
-            ErrorLog(fmt::format("xrDestroyInstance: {}\n", exc.what()));
-            result = XR_ERROR_RUNTIME_FAILURE;
-        }
-
-        TraceLoggingWrite(g_traceProvider, "xrDestroyInstance_Result", TLArg(xr::ToCString(result), "Result"));
-        if (XR_FAILED(result)) {
-            ErrorLog(fmt::format("xrDestroyInstance failed with {}\n", xr::ToCString(result)));
-        }
-
-        return result;
-    }
-
     // Forward the xrGetInstanceProcAddr() call to the dispatcher.
     XrResult XRAPI_CALL xrGetInstanceProcAddr(XrInstance instance, const char* name, PFN_xrVoidFunction* function) {
         TraceLoggingWrite(g_traceProvider, "xrGetInstanceProcAddr");

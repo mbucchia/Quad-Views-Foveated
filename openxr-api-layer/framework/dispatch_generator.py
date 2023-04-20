@@ -129,7 +129,13 @@ namespace openxr_api_layer
         generated_get_instance_proc_addr = self.genGetInstanceProcAddr()
         generated_create_instance = self.genCreateInstance()
 
-        postamble = '''} // namespace openxr_api_layer
+        postamble = '''	std::unique_ptr<OpenXrApi> g_instance;
+
+	void ResetInstance() {
+		g_instance.reset();
+	}
+
+} // namespace openxr_api_layer
 '''
 
         contents = f'''
@@ -151,7 +157,7 @@ namespace openxr_api_layer
         generated = ''
 
         for cur_cmd in self.core_commands + self.ext_commands:
-            if cur_cmd.name in layer_apis.override_functions:
+            if cur_cmd.name in (layer_apis.override_functions + ['xrDestroyInstance']):
                 parameters_list = self.makeParametersList(cur_cmd)
                 arguments_list = self.makeArgumentsList(cur_cmd)
 
@@ -279,6 +285,8 @@ class DispatchGenHOutputGenerator(DispatchGenOutputGenerator):
 namespace openxr_api_layer
 {
 
+	void ResetInstance();
+
 	class OpenXrApi
 	{
 	private:
@@ -323,6 +331,16 @@ namespace openxr_api_layer
 		// Specially-handled by the auto-generated code.
 		virtual XrResult xrGetInstanceProcAddr(XrInstance instance, const char* name, PFN_xrVoidFunction* function);
 		virtual XrResult xrCreateInstance(const XrInstanceCreateInfo* createInfo);
+
+		// Specially-handled destruction code.
+		XrResult xrDestroyInstance(XrInstance instance) {
+			// Invoking ResetInstance() is equivalent to `delete this;' so we must take precautions.
+			PFN_xrDestroyInstance finalDestroyInstance = m_xrDestroyInstance;
+			ResetInstance();
+			return finalDestroyInstance(instance);
+		}
+	private:
+		PFN_xrDestroyInstance m_xrDestroyInstance{nullptr};
 '''
         write(preamble, file=self.outFile)
 
@@ -331,6 +349,8 @@ namespace openxr_api_layer
 
         postamble = '''
 	};
+
+	extern std::unique_ptr<OpenXrApi> g_instance;
 
 } // namespace openxr_api_layer
 '''
@@ -348,7 +368,7 @@ namespace openxr_api_layer
     def genVirtualMethods(self):
         generated = ''
 
-        commands_to_include = list(set(layer_apis.override_functions + layer_apis.requested_functions + ['xrDestroyInstance']))
+        commands_to_include = list(set(layer_apis.override_functions + layer_apis.requested_functions))
         for cur_cmd in self.core_commands + self.ext_commands:
             if cur_cmd.name in commands_to_include:
                 parameters_list = self.makeParametersList(cur_cmd)

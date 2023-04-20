@@ -32,9 +32,6 @@ namespace openxr_api_layer {
     // Singleton accessor.
     OpenXrApi* GetInstance();
 
-    // A function to reset (delete) the singleton.
-    void ResetInstance();
-
     // The path where the DLL is loaded from (eg: to load data files).
     extern std::filesystem::path dllHome;
 
