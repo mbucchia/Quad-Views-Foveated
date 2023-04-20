@@ -42,9 +42,9 @@ namespace openxr_api_layer {
             apiLayerInfo->structSize != sizeof(XrApiLayerCreateInfo) || !apiLayerInfo->nextInfo ||
             apiLayerInfo->nextInfo->structType != XR_LOADER_INTERFACE_STRUCT_API_LAYER_NEXT_INFO ||
             apiLayerInfo->nextInfo->structVersion != XR_API_LAYER_NEXT_INFO_STRUCT_VERSION ||
-            apiLayerInfo->nextInfo->structSize != sizeof(XrApiLayerNextInfo) ||
-            apiLayerInfo->nextInfo->layerName != LayerName || !apiLayerInfo->nextInfo->nextGetInstanceProcAddr ||
-            !apiLayerInfo->nextInfo->nextCreateApiLayerInstance) {
+            apiLayerInfo->nextInfo->structSize != sizeof(XrApiLayerNextInfo) || !apiLayerInfo->nextInfo->layerName ||
+            std::string_view(apiLayerInfo->nextInfo->layerName) != LAYER_NAME ||
+            !apiLayerInfo->nextInfo->nextGetInstanceProcAddr || !apiLayerInfo->nextInfo->nextCreateApiLayerInstance) {
             ErrorLog("xrCreateApiLayerInstance validation failed\n");
             return XR_ERROR_INITIALIZATION_FAILED;
         }

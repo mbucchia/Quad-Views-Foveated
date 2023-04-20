@@ -75,7 +75,7 @@ XrResult __declspec(dllexport) XRAPI_CALL
 
     DebugLog("--> xrNegotiateLoaderApiLayerInterface\n");
 
-    if (apiLayerName && apiLayerName != LayerName) {
+    if (apiLayerName && std::string_view(apiLayerName) != LAYER_NAME) {
         ErrorLog(fmt::format("Invalid apiLayerName \"{}\"\n", apiLayerName));
         return XR_ERROR_INITIALIZATION_FAILED;
     }
