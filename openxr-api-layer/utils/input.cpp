@@ -62,6 +62,7 @@ namespace {
         XrAction thumbstickClickAction{XR_NULL_HANDLE};
         XrAction thumbstickPositionAction{XR_NULL_HANDLE};
         XrAction hapticAction{XR_NULL_HANDLE};
+        bool isOpenComposite{false};
     };
 
     struct ForwardDispatch {
@@ -91,6 +92,9 @@ namespace {
 
             CHECK_XRCMD(
                 xrGetInstanceProcAddr(instance, "xrPollEvent", reinterpret_cast<PFN_xrVoidFunction*>(&xrPollEvent)));
+            CHECK_XRCMD(xrGetInstanceProcAddr(instance,
+                                              "xrGetCurrentInteractionProfile",
+                                              reinterpret_cast<PFN_xrVoidFunction*>(&xrGetCurrentInteractionProfile)));
             CHECK_XRCMD(xrGetInstanceProcAddr(
                 instance, "xrLocateSpace", reinterpret_cast<PFN_xrVoidFunction*>(&xrLocateSpace)));
             CHECK_XRCMD(xrGetInstanceProcAddr(
@@ -102,6 +106,8 @@ namespace {
                 instance, "xrApplyHapticFeedback", reinterpret_cast<PFN_xrVoidFunction*>(&xrApplyHapticFeedback)));
             CHECK_XRCMD(xrGetInstanceProcAddr(
                 instance, "xrStringToPath", reinterpret_cast<PFN_xrVoidFunction*>(&xrStringToPath)));
+            CHECK_XRCMD(xrGetInstanceProcAddr(
+                instance, "xrPathToString", reinterpret_cast<PFN_xrVoidFunction*>(&xrPathToString)));
 
             CHECK_XRCMD(xrStringToPath(m_instance, "/user/hand/left", &m_sidePath[Hands::Left]));
             CHECK_XRCMD(xrStringToPath(m_instance, "/user/hand/right", &m_sidePath[Hands::Right]));
@@ -185,6 +191,10 @@ namespace {
                     "Motion controller tracking is not available (did you specify MotionControllerSpatial methods?)");
             }
 
+            if (!m_wasActionSetsAttached) {
+                return 0;
+            }
+
             // Prevent error before the first frame.
             XrSpaceLocationFlags locationFlags = 0;
             if (m_currentFrameTime) {
@@ -248,6 +258,10 @@ namespace {
                                          "MotionControllerButtons input method?)");
             }
 
+            if (!m_wasActionSetsAttached) {
+                return false;
+            }
+
             XrActionStateGetInfo actionInfo{XR_TYPE_ACTION_STATE_GET_INFO};
             actionInfo.action = action;
             actionInfo.subactionPath = m_sidePath[side];
@@ -257,8 +271,8 @@ namespace {
 
             TraceLoggingWriteStop(local,
                                   "InputFramework_GetMotionControllerButtonState",
-                                  TLArg(state.isActive, "IsActive"),
-                                  TLArg(state.currentState, "State"));
+                                  TLArg(!!state.isActive, "IsActive"),
+                                  TLArg(!!state.currentState, "State"));
 
             return state.isActive && state.currentState;
         }
@@ -279,6 +293,10 @@ namespace {
                                          "MotionControllerButtons input method?)");
             }
 
+            if (!m_wasActionSetsAttached) {
+                return {0, 0};
+            }
+
             XrActionStateGetInfo actionInfo{XR_TYPE_ACTION_STATE_GET_INFO};
             actionInfo.action = m_frameworkActions.thumbstickPositionAction;
             actionInfo.subactionPath = m_sidePath[side];
@@ -289,7 +307,7 @@ namespace {
             TraceLoggingWriteStart(
                 local,
                 "InputFramework_GetMotionControllerThumbstickState",
-                TLArg(state.isActive, "IsActive"),
+                TLArg(!!state.isActive, "IsActive"),
                 TLArg(fmt::format("x:{}, y:{}", state.currentState.x, state.currentState.y).c_str(), "State"));
 
             if (state.isActive) {
@@ -313,6 +331,10 @@ namespace {
             if (m_frameworkActions.hapticAction == XR_NULL_HANDLE) {
                 throw std::runtime_error("Motion controller haptics is not available (did you specify the "
                                          "MotionControllerHaptics input method?)");
+            }
+
+            if (!m_wasActionSetsAttached) {
+                return;
             }
 
             XrHapticActionInfo hapticInfo{XR_TYPE_HAPTIC_ACTION_INFO};
@@ -363,62 +385,93 @@ namespace {
             if (XR_SUCCEEDED(result)) {
                 std::unique_lock lock(m_frameMutex);
 
-                // If the application doesn't use motion controller at all, we need to attach our actionset ourselves...
-                if (m_frameworkActions.actionSet != XR_NULL_HANDLE && !m_wasActionSetsAttached) {
-                    TraceLoggingWriteTagged(local, "InputFramework_BeginFrame_SetupFrameworkActionSet");
+                if (m_frameworkActions.actionSet != XR_NULL_HANDLE) {
+                    TraceLoggingWriteTagged(local,
+                                            "InputFramework_BeginFrame_State",
+                                            TLArg(m_wasActionSetsAttached, "WasActionSetsAttached"),
+                                            TLArg(m_needPollEvent, "NeedPollEvent"),
+                                            TLArg(m_frameworkActions.isOpenComposite, "IsOpenComposite"),
+                                            TLArg(m_isInteractionProfileValid, "IsInteractionProfileValid"));
 
-                    // Make sure our bindings are complete. We only submit suggestions for the interaction profiles in
-                    // the core spec, and hope runtimes do the right thing for implicit remapping.
-                    const char* coreInteractionProfiles[] = {"/interaction_profiles/khr/simple_controller",
-                                                             "/interaction_profiles/htc/vive_controller",
-                                                             "/interaction_profiles/microsoft/motion_controller",
-                                                             "/interaction_profiles/oculus/touch_controller",
-                                                             "/interaction_profiles/valve/index_controller"};
-                    for (const auto& interationProfile : coreInteractionProfiles) {
-                        XrInteractionProfileSuggestedBinding bindings{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
-                        CHECK_XRCMD(xrStringToPath(m_instance, interationProfile, &bindings.interactionProfile));
-                        const XrResult suggestResult = xrSuggestInteractionProfileBindings(m_instance, &bindings);
-                        if (XR_FAILED(suggestResult)) {
-                            TraceLoggingWriteTagged(local,
-                                                    "InputFramework_BeginFrame_SuggestInteractionProfileBindings_Error",
-                                                    TLArg(xr::ToString(suggestResult).c_str(), "Result"));
-                            ErrorLog(fmt::format("Could not suggest framework's bindings: {}\n",
-                                                 xr::ToCString(suggestResult)));
-                        }
-                    }
+                    // If the application doesn't use motion controller at all, we need to attach our actionset
+                    // ourselves...
+                    //
+                    // Quirk: OpenComposite waits for an interaction profile to be reported before finishing
+                    // initialization of its action system.
+                    if (!m_wasActionSetsAttached &&
+                        (!m_frameworkActions.isOpenComposite || m_isInteractionProfileValid)) {
+                        TraceLoggingWriteTagged(local, "InputFramework_BeginFrame_SetupFrameworkActionSet");
 
-                    XrSessionActionSetsAttachInfo attachInfo{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
-                    const XrResult attachResult = xrAttachSessionActionSets_subst(session, &attachInfo);
-                    if (XR_SUCCEEDED(attachResult)) {
-                        // We will also need to do our own synchronization of actions.
-                        m_needSyncActions = true;
-                    } else {
-                        TraceLoggingWriteTagged(local,
-                                                "InputFramework_BeginFrame_AttachSessionActionSets_Error",
-                                                TLArg(xr::ToString(attachResult).c_str(), "Result"));
-                        ErrorLog(fmt::format("Could not attach framework's actionset for session: {}\n",
-                                             xr::ToCString(attachResult)));
-                    }
-                }
-
-                // ...and to synchronize actions ourselves.
-                if (m_needSyncActions) {
-                    // If the application does not poll for events, we need to do it ourselves to avoid the session
-                    // remaining stuck in the non-focused state (which will make xrSyncActions() fail).
-                    if (m_needPollEvent) {
-                        TraceLoggingWriteTagged(local, "InputFramework_BeginFrame_PollEvent");
-
-                        while (true) {
-                            XrEventDataBuffer buf{XR_TYPE_EVENT_DATA_BUFFER};
-                            if (xrPollEvent(m_instance, &buf) != XR_SUCCESS) {
-                                break;
+                        // Make sure our bindings are complete. We only submit suggestions for the interaction profiles
+                        // in the core spec, and hope runtimes do the right thing for implicit remapping.
+                        const char* coreInteractionProfiles[] = {"/interaction_profiles/khr/simple_controller",
+                                                                 "/interaction_profiles/htc/vive_controller",
+                                                                 "/interaction_profiles/microsoft/motion_controller",
+                                                                 "/interaction_profiles/oculus/touch_controller",
+                                                                 "/interaction_profiles/valve/index_controller"};
+                        for (const auto& interationProfile : coreInteractionProfiles) {
+                            XrInteractionProfileSuggestedBinding bindings{
+                                XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+                            CHECK_XRCMD(xrStringToPath(m_instance, interationProfile, &bindings.interactionProfile));
+                            const XrResult suggestResult = xrSuggestInteractionProfileBindings(m_instance, &bindings);
+                            if (XR_FAILED(suggestResult)) {
+                                TraceLoggingWriteTagged(
+                                    local,
+                                    "InputFramework_BeginFrame_SuggestInteractionProfileBindings_Error",
+                                    TLArg(xr::ToString(suggestResult).c_str(), "Result"));
+                                ErrorLog(fmt::format("Could not suggest framework's bindings for {}: {}\n",
+                                                     interationProfile,
+                                                     xr::ToCString(suggestResult)));
                             }
                         }
+
+                        XrSessionActionSetsAttachInfo attachInfo{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+                        const XrResult attachResult = xrAttachSessionActionSets_subst(session, &attachInfo);
+                        if (XR_FAILED(attachResult)) {
+                            TraceLoggingWriteTagged(local,
+                                                    "InputFramework_BeginFrame_AttachSessionActionSets_Error",
+                                                    TLArg(xr::ToString(attachResult).c_str(), "Result"));
+                            ErrorLog(fmt::format("Could not attach framework's actionset for session: {}\n",
+                                                 xr::ToCString(attachResult)));
+                        }
                     }
 
-                    TraceLoggingWriteTagged(local, "InputFramework_BeginFrame_SyncFrameworkActions");
-                    XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
-                    CHECK_XRCMD(xrSyncActions_subst(session, &syncInfo));
+                    if (m_wasActionSetsAttached) {
+                        // ...and to synchronize actions ourselves.
+                        // If the application does not poll for events, we need to do it ourselves to avoid the
+                        // session remaining stuck in the non-focused state (which will make xrSyncActions() fail).
+                        if (m_needPollEvent) {
+                            TraceLoggingWriteTagged(local, "InputFramework_BeginFrame_PollEvent");
+
+                            while (true) {
+                                XrEventDataBuffer buf{XR_TYPE_EVENT_DATA_BUFFER};
+                                if (xrPollEvent(m_instance, &buf) != XR_SUCCESS) {
+                                    break;
+                                }
+                            }
+                        }
+
+                        TraceLoggingWriteTagged(local, "InputFramework_BeginFrame_SyncFrameworkActions");
+                        XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
+                        XrActiveActionSet frameworkActionSet{m_frameworkActions.actionSet, XR_NULL_PATH};
+                        syncInfo.activeActionSets = &frameworkActionSet;
+                        syncInfo.countActiveActionSets = 1;
+                        CHECK_XRCMD(m_forwardDispatch.xrSyncActions(session, &syncInfo));
+
+                        // Dump the interaction profiles for tracing.
+                        XrInteractionProfileState leftState{XR_TYPE_INTERACTION_PROFILE_STATE};
+                        CHECK_XRCMD(xrGetCurrentInteractionProfile(m_session, m_sidePath[xr::Side::Left], &leftState));
+                        XrInteractionProfileState rightState{XR_TYPE_INTERACTION_PROFILE_STATE};
+                        CHECK_XRCMD(
+                            xrGetCurrentInteractionProfile(m_session, m_sidePath[xr::Side::Right], &rightState));
+                        TraceLoggingWriteTagged(local,
+                                                "InputFramework_BeginFrame_CurrentInteractionProfiles",
+                                                TLArg(getXrPath(leftState.interactionProfile).c_str(), "Left"),
+                                                TLArg(getXrPath(rightState.interactionProfile).c_str(), "Right"));
+
+                        m_isInteractionProfileValid = leftState.interactionProfile != XR_NULL_PATH ||
+                                                      rightState.interactionProfile != XR_NULL_PATH;
+                    }
                 }
 
                 // We keep track of the current frame time in order to query the tracking information for that frame.
@@ -445,6 +498,11 @@ namespace {
             std::vector<XrActionSet> actionSets(chainAttachInfo.actionSets,
                                                 chainAttachInfo.actionSets + chainAttachInfo.countActionSets);
             if (m_frameworkActions.actionSet != XR_NULL_HANDLE) {
+                TraceLoggingWriteTagged(local,
+                                        "InputFramework_AttachSessionActionSets_Inject",
+                                        TLXArg(m_frameworkActions.actionSet, "ActionSet"),
+                                        TLArg(chainAttachInfo.countActionSets, "OldCount"),
+                                        TLArg(chainAttachInfo.countActionSets + 1, "NewCount"));
                 actionSets.push_back(m_frameworkActions.actionSet);
             }
             chainAttachInfo.actionSets = actionSets.data();
@@ -469,25 +527,29 @@ namespace {
                 return XR_ERROR_VALIDATION_FAILURE;
             }
 
-            XrActionsSyncInfo chainSyncInfo = *syncInfo;
-
-            // Sync our actionset and block out app action sets when requested
-            std::vector<XrActiveActionSet> activeActionSets;
+            XrResult result = XR_SUCCESS;
             if (!m_blockApplicationInputs) {
-                activeActionSets.assign(chainSyncInfo.activeActionSets,
-                                        chainSyncInfo.activeActionSets + chainSyncInfo.countActiveActionSets);
+                result = m_forwardDispatch.xrSyncActions(session, syncInfo);
+            } else {
+                TraceLoggingWriteTagged(local, "InputFramework_SyncActions_Block");
             }
-            if (m_frameworkActions.actionSet != XR_NULL_HANDLE) {
-                activeActionSets.push_back({m_frameworkActions.actionSet, XR_NULL_PATH});
-            }
-            chainSyncInfo.activeActionSets = activeActionSets.data();
-            chainSyncInfo.countActiveActionSets = static_cast<uint32_t>(activeActionSets.size());
-
-            const XrResult result = m_forwardDispatch.xrSyncActions(session, &chainSyncInfo);
 
             TraceLoggingWriteStop(local, "InputFramework_SyncActions", TLArg(xr::ToCString(result), "Result"));
 
             return result;
+        }
+
+        const std::string getXrPath(XrPath path) {
+            if (path == XR_NULL_PATH) {
+                return "<null>";
+            }
+
+            char buf[XR_MAX_PATH_LENGTH];
+            uint32_t count;
+            CHECK_XRCMD(xrPathToString(m_instance, path, sizeof(buf), &count, buf));
+            std::string str;
+            str.assign(buf, count - 1);
+            return str;
         }
 
         const XrInstance m_instance;
@@ -503,19 +565,21 @@ namespace {
         XrPath m_sidePath[Hands::Count]{{XR_NULL_PATH}, {XR_NULL_PATH}};
         XrSpace m_aimActionSpace[Hands::Count]{{XR_NULL_HANDLE}, {XR_NULL_HANDLE}};
         bool m_wasActionSetsAttached{false};
-        bool m_needSyncActions{false};
-        bool m_needPollEvent;
+        bool m_needPollEvent{false};
+        bool m_isInteractionProfileValid{false};
 
         std::mutex m_frameMutex;
         std::deque<XrTime> m_waitedFrameTime;
         XrTime m_currentFrameTime{0};
 
         PFN_xrPollEvent xrPollEvent{nullptr};
+        PFN_xrGetCurrentInteractionProfile xrGetCurrentInteractionProfile{nullptr};
         PFN_xrLocateSpace xrLocateSpace{nullptr};
         PFN_xrGetActionStateBoolean xrGetActionStateBoolean{nullptr};
         PFN_xrGetActionStateVector2f xrGetActionStateVector2f{nullptr};
         PFN_xrApplyHapticFeedback xrApplyHapticFeedback{nullptr};
         PFN_xrStringToPath xrStringToPath{nullptr};
+        PFN_xrPathToString xrPathToString{nullptr};
     };
 
     struct InputFrameworkFactory : IInputFrameworkFactory {
@@ -535,6 +599,10 @@ namespace {
                 }
                 factory = this;
             }
+
+            // Detect OpenComposite so we can apply the delayed actionset quirk.
+            m_frameworkActions.isOpenComposite =
+                std::string_view(instanceInfo.applicationInfo.applicationName).substr(0, 14) == "OpenComposite_";
 
             // Deep-copy the instance extensions strings.
             m_instanceExtensions.reserve(m_instanceInfo.enabledExtensionCount);
@@ -948,6 +1016,10 @@ namespace {
         }
 
         const std::string getXrPath(XrPath path) {
+            if (path == XR_NULL_PATH) {
+                return "<null>";
+            }
+
             char buf[XR_MAX_PATH_LENGTH];
             uint32_t count;
             CHECK_XRCMD(xrPathToString(m_instance, path, sizeof(buf), &count, buf));
