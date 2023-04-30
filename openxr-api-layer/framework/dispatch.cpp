@@ -76,38 +76,38 @@ namespace openxr_api_layer {
             XrApiLayerCreateInfo chainApiLayerInfo = *apiLayerInfo;
             chainApiLayerInfo.nextInfo = apiLayerInfo->nextInfo->next;
 
-            CHECK_XRCMD(apiLayerInfo->nextInfo->nextCreateApiLayerInstance(
-                &dummyCreateInfo, &chainApiLayerInfo, &dummyInstance));
+            if (XR_SUCCEEDED(apiLayerInfo->nextInfo->nextCreateApiLayerInstance(
+                    &dummyCreateInfo, &chainApiLayerInfo, &dummyInstance))) {
+                PFN_xrDestroyInstance xrDestroyInstance;
+                CHECK_XRCMD(apiLayerInfo->nextInfo->nextGetInstanceProcAddr(
+                    dummyInstance, "xrDestroyInstance", reinterpret_cast<PFN_xrVoidFunction*>(&xrDestroyInstance)));
 
-            PFN_xrDestroyInstance xrDestroyInstance;
-            CHECK_XRCMD(apiLayerInfo->nextInfo->nextGetInstanceProcAddr(
-                dummyInstance, "xrDestroyInstance", reinterpret_cast<PFN_xrVoidFunction*>(&xrDestroyInstance)));
+                // Check the available extensions.
+                PFN_xrEnumerateInstanceExtensionProperties xrEnumerateInstanceExtensionProperties;
+                CHECK_XRCMD(apiLayerInfo->nextInfo->nextGetInstanceProcAddr(
+                    dummyInstance,
+                    "xrEnumerateInstanceExtensionProperties",
+                    reinterpret_cast<PFN_xrVoidFunction*>(&xrEnumerateInstanceExtensionProperties)));
 
-            // Check the available extensions.
-            PFN_xrEnumerateInstanceExtensionProperties xrEnumerateInstanceExtensionProperties;
-            CHECK_XRCMD(apiLayerInfo->nextInfo->nextGetInstanceProcAddr(
-                dummyInstance,
-                "xrEnumerateInstanceExtensionProperties",
-                reinterpret_cast<PFN_xrVoidFunction*>(&xrEnumerateInstanceExtensionProperties)));
+                uint32_t extensionsCount = 0;
+                CHECK_XRCMD(xrEnumerateInstanceExtensionProperties(nullptr, 0, &extensionsCount, nullptr));
+                std::vector<XrExtensionProperties> extensions(extensionsCount, {XR_TYPE_EXTENSION_PROPERTIES});
+                CHECK_XRCMD(xrEnumerateInstanceExtensionProperties(
+                    nullptr, extensionsCount, &extensionsCount, extensions.data()));
 
-            uint32_t extensionsCount = 0;
-            CHECK_XRCMD(xrEnumerateInstanceExtensionProperties(nullptr, 0, &extensionsCount, nullptr));
-            std::vector<XrExtensionProperties> extensions(extensionsCount, {XR_TYPE_EXTENSION_PROPERTIES});
-            CHECK_XRCMD(
-                xrEnumerateInstanceExtensionProperties(nullptr, extensionsCount, &extensionsCount, extensions.data()));
-
-            for (const std::string& extensionName : implicitExtensions) {
-                const auto matchExtensionName = [&](const XrExtensionProperties& properties) {
-                    return properties.extensionName == extensionName;
-                };
-                if (std::find_if(extensions.cbegin(), extensions.cend(), matchExtensionName) != extensions.cend()) {
-                    filteredImplicitExtensions.push_back(extensionName);
-                } else {
-                    Log(fmt::format("Cannot satisfy implicit extension request: {}\n", extensionName));
+                for (const std::string& extensionName : implicitExtensions) {
+                    const auto matchExtensionName = [&](const XrExtensionProperties& properties) {
+                        return properties.extensionName == extensionName;
+                    };
+                    if (std::find_if(extensions.cbegin(), extensions.cend(), matchExtensionName) != extensions.cend()) {
+                        filteredImplicitExtensions.push_back(extensionName);
+                    } else {
+                        Log(fmt::format("Cannot satisfy implicit extension request: {}\n", extensionName));
+                    }
                 }
-            }
 
-            CHECK_XRCMD(xrDestroyInstance(dummyInstance));
+                CHECK_XRCMD(xrDestroyInstance(dummyInstance));
+            }
         }
 
         // Dump the requested extensions.
