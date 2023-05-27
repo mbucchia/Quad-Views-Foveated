@@ -755,7 +755,9 @@ namespace {
             std::shared_ptr<ISwapchain> result;
             if ((mode & SwapchainMode::Submit) == SwapchainMode::Submit) {
                 XrSwapchain swapchain;
-                CHECK_XRCMD(xrCreateSwapchain(m_session, &infoOnApplicationDevice, &swapchain));
+                XrSwapchainCreateInfo createInfo = infoOnApplicationDevice;
+                createInfo.type = XR_TYPE_SWAPCHAIN_CREATE_INFO;
+                CHECK_XRCMD(xrCreateSwapchain(m_session, &createInfo, &swapchain));
                 result = std::make_shared<SubmittableSwapchain>(xrGetInstanceProcAddr,
                                                                 m_instance,
                                                                 swapchain,
