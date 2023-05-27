@@ -333,7 +333,7 @@ namespace openxr_api_layer
 		virtual XrResult xrCreateInstance(const XrInstanceCreateInfo* createInfo);
 
 		// Specially-handled destruction code.
-		XrResult xrDestroyInstance(XrInstance instance) {
+		virtual XrResult xrDestroyInstance(XrInstance instance) {
 			// Invoking ResetInstance() is equivalent to `delete this;' so we must take precautions.
 			PFN_xrDestroyInstance finalDestroyInstance = m_xrDestroyInstance;
 			ResetInstance();
