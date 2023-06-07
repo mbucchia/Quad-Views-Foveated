@@ -26,7 +26,31 @@
 
 namespace {
 
+    using namespace openxr_api_layer::utils;
     using namespace DirectX;
+
+    class CpuTimer : public general::ITimer {
+        using clock = std::chrono::high_resolution_clock;
+
+      public:
+        void start() override {
+            m_timeStart = clock::now();
+        }
+
+        void stop() override {
+            m_duration += clock::now() - m_timeStart;
+        }
+
+        uint64_t query() const override {
+            const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(m_duration);
+            m_duration = clock::duration::zero();
+            return duration.count();
+        }
+
+      private:
+        clock::time_point m_timeStart;
+        mutable clock::duration m_duration{0};
+    };
 
     // Taken from
     // https://github.com/microsoft/OpenXR-MixedReality/blob/main/samples/SceneUnderstandingUwp/Scene_Placement.cpp
@@ -63,6 +87,10 @@ namespace {
 } // namespace
 
 namespace openxr_api_layer::utils::general {
+
+    std::shared_ptr<ITimer> createTimer() {
+        return std::make_shared<CpuTimer>();
+    }
 
     bool hitTest(const XrPosef& ray, const XrPosef& quadCenter, const XrExtent2Df& quadSize, XrPosef& hitPose) {
         using namespace DirectX;
