@@ -29,6 +29,7 @@
 
 // Standard library.
 #include <algorithm>
+#include <array>
 #include <cstdarg>
 #include <ctime>
 #include <deque>
@@ -46,6 +47,7 @@ using namespace std::chrono_literals;
 
 // Windows header files.
 #define WIN32_LEAN_AND_MEAN             // Exclude rarely-used stuff from Windows headers
+#define NOMINMAX
 #include <windows.h>
 #include <unknwn.h>
 #include <wrl.h>

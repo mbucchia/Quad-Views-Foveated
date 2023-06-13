@@ -288,6 +288,7 @@ copy $(SolutionDir)\scripts\Uninstall-Layer32.ps1 $(OutDir)
     <ClInclude Include="framework\util.h" />
     <ClInclude Include="layer.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="views.h" />
     <ClInclude Include="utils\general.h" />
     <ClInclude Include="utils\graphics.h" />
     <ClInclude Include="utils\inputs.h" />

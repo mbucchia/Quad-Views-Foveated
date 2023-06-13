@@ -6,6 +6,18 @@
     "api_version": "1.0",
     "implementation_version": "1",
     "description": "Emulate quad views foveation support",
+    "instance_extensions": [
+      {
+        "name": "XR_VARJO_quad_views",
+        "extension_version": 1,
+        "entrypoints": []
+      },
+      {
+        "name": "XR_VARJO_foveated_rendering",
+        "extension_version": 3,
+        "entrypoints": []
+      }
+    ],
     "functions": {
       "xrNegotiateLoaderApiLayerInterface": "xrNegotiateLoaderApiLayerInterface"
     },
