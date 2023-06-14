@@ -34,6 +34,8 @@
 #include <ProjectionVS.h>
 #include <ProjectionPS.h>
 
+//#define DEBUG_WITHOUT_TRACKER
+
 namespace openxr_api_layer {
 
     using namespace log;
@@ -43,7 +45,8 @@ namespace openxr_api_layer {
     // Initialize these vectors with arrays of extensions to block and implicitly request for the instance.
     const std::vector<std::string> blockedExtensions = {XR_VARJO_QUAD_VIEWS_EXTENSION_NAME,
                                                         XR_VARJO_FOVEATED_RENDERING_EXTENSION_NAME};
-    const std::vector<std::string> implicitExtensions = {XR_KHR_D3D11_ENABLE_EXTENSION_NAME};
+    const std::vector<std::string> implicitExtensions = {XR_KHR_D3D11_ENABLE_EXTENSION_NAME,
+                                                         XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME};
 
     struct ProjectionConstants {
         DirectX::XMFLOAT4X4 Projection;
@@ -140,12 +143,27 @@ namespace openxr_api_layer {
             const XrResult result = OpenXrApi::xrGetSystem(instance, getInfo, systemId);
 
             if (XR_SUCCEEDED(result) && getInfo->formFactor == XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY) {
+                // Check if the system supports eye tracking.
+                XrSystemEyeTrackingPropertiesFB eyeTrackingProperties{XR_TYPE_SYSTEM_EYE_TRACKING_PROPERTIES_FB};
+                eyeTrackingProperties.supportsEyeTracking = XR_FALSE;
+                XrSystemProperties systemProperties{XR_TYPE_SYSTEM_PROPERTIES};
+                systemProperties.next = &eyeTrackingProperties;
+                CHECK_XRCMD(OpenXrApi::xrGetSystemProperties(instance, *systemId, &systemProperties));
+                TraceLoggingWrite(g_traceProvider,
+                                  "xrGetSystem",
+                                  TLArg(systemProperties.systemName, "SystemName"),
+                                  TLArg(eyeTrackingProperties.supportsEyeTracking, "SupportsEyeTracking"));
+
+#ifndef DEBUG_WITHOUT_TRACKER
+                m_isEyeTrackingAvailable = eyeTrackingProperties.supportsEyeTracking;
+#else
+                m_isEyeTrackingAvailable = true;
+#endif
+
                 static bool wasSystemLogged = false;
                 if (!wasSystemLogged) {
-                    XrSystemProperties systemProperties{XR_TYPE_SYSTEM_PROPERTIES};
-                    CHECK_XRCMD(OpenXrApi::xrGetSystemProperties(instance, *systemId, &systemProperties));
-                    TraceLoggingWrite(g_traceProvider, "xrGetSystem", TLArg(systemProperties.systemName, "SystemName"));
                     Log(fmt::format("Using OpenXR system: {}\n", systemProperties.systemName));
+                    Log(fmt::format("Eye tracking is {}\n", m_isEyeTrackingAvailable ? "supported" : "not supported"));
                     wasSystemLogged = true;
                 }
             }
@@ -278,7 +296,7 @@ namespace openxr_api_layer {
 
                         // Override default to specify whether foveated rendering is desired when the application does
                         // not specify.
-                        bool foveatedRenderingActive = m_preferFoveatedRendering;
+                        bool foveatedRenderingActive = m_isEyeTrackingAvailable && m_preferFoveatedRendering;
 
                         // When foveated rendering extension is active, look whether the application is requesting it
                         // for the views. The spec is a little questionable and calls for each view to have the flag
@@ -527,6 +545,20 @@ namespace openxr_api_layer {
 
             const XrResult result = OpenXrApi::xrBeginSession(session, &chainBeginInfo);
 
+            if (XR_SUCCEEDED(result)) {
+                if (m_isEyeTrackingAvailable) {
+#ifndef DEBUG_WITHOUT_TRACKER
+                    XrEyeTrackerCreateInfoFB createInfo{XR_TYPE_EYE_TRACKER_CREATE_INFO_FB};
+                    CHECK_XRCMD(OpenXrApi::xrCreateEyeTrackerFB(session, &createInfo, &m_eyeTrackerFB));
+
+                    XrReferenceSpaceCreateInfo spaceCreateInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+                    spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+                    spaceCreateInfo.poseInReferenceSpace = Pose::Identity();
+                    CHECK_XRCMD(OpenXrApi::xrCreateReferenceSpace(session, &spaceCreateInfo, &m_viewSpace));
+#endif
+                }
+            }
+
             return result;
         }
 
@@ -580,7 +612,7 @@ namespace openxr_api_layer {
                                 (XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_VALID_BIT)) {
                                 // Override default to specify whether foveated rendering is desired when the
                                 // application does not specify.
-                                bool foveatedRenderingActive = m_preferFoveatedRendering;
+                                bool foveatedRenderingActive = m_isEyeTrackingAvailable && m_preferFoveatedRendering;
 
                                 if (m_requestedFoveatedRendering) {
                                     const XrViewLocateFoveatedRenderingVARJO* foveatedLocate =
@@ -940,13 +972,38 @@ namespace openxr_api_layer {
             ComPtr<ID3D11Texture2D> flatImage;
         };
 
-        bool getEyeGaze(XrTime time, bool getStateOnly, XrVector3f& unitVector) const {
+        bool getEyeGaze(XrTime time, bool getStateOnly, XrVector3f& unitVector) {
             if (!m_isEyeTrackingAvailable) {
                 return false;
             }
 
-            // TODO, P1: Add support for querying the eye tracker.
-            XrVector2f point{0.5f, 0.5f};
+#ifndef DEBUG_WITHOUT_TRACKER
+            XrEyeGazesInfoFB eyeGazeInfo{XR_TYPE_EYE_GAZES_INFO_FB};
+            eyeGazeInfo.baseSpace = m_viewSpace;
+            eyeGazeInfo.time = time;
+
+            XrEyeGazesFB eyeGaze{XR_TYPE_EYE_GAZES_FB};
+            CHECK_XRCMD(OpenXrApi::xrGetEyeGazesFB(m_eyeTrackerFB, &eyeGazeInfo, &eyeGaze));
+
+            if (!(eyeGaze.gaze[0].isValid && eyeGaze.gaze[1].isValid)) {
+                return false;
+            }
+
+            if (!(eyeGaze.gaze[0].gazeConfidence > 0.5f && eyeGaze.gaze[1].gazeConfidence > 0.5f)) {
+                return false;
+            }
+
+            if (!getStateOnly) {
+                // Average the poses from both eyes.
+                const auto gaze = LoadXrPose(Pose::Slerp(eyeGaze.gaze[0].gazePose, eyeGaze.gaze[1].gazePose, 0.5f));
+                const auto gazeProjectedPoint =
+                    DirectX::XMVector3Transform(DirectX::XMVectorSet(0.f, 0.f, 1.f, 1.f), gaze);
+
+                unitVector.x = gazeProjectedPoint.m128_f32[0];
+                unitVector.y = gazeProjectedPoint.m128_f32[1];
+                unitVector.z = gazeProjectedPoint.m128_f32[2];
+            }
+#else
             {
                 // Use the mouse to simulate eye tracking.
                 RECT rect;
@@ -956,13 +1013,13 @@ namespace openxr_api_layer {
                 rect.bottom = 999;
                 ClipCursor(&rect);
 
-                POINT pt{};
-                GetCursorPos(&pt);
+                POINT cursor{};
+                GetCursorPos(&cursor);
 
-                point = {(float)pt.x / 1000.f, (1000.f - pt.y) / 1000.f};
+                XrVector2f point = {(float)cursor.x / 1000.f, (1000.f - cursor.y) / 1000.f};
+                unitVector = Normalize({point.x - 0.5f, 0.5f - point.y, -0.35f});
             }
-
-            unitVector = Normalize({point.x - 0.5f, 0.5f - point.y, -0.35f});
+#endif
 
             return true;
         }
@@ -1277,7 +1334,7 @@ namespace openxr_api_layer {
         bool m_requestedFoveatedRendering{false};
         bool m_loggedResolution{false};
         bool m_isFovMutable{false};
-        bool m_isEyeTrackingAvailable{true};
+        bool m_isEyeTrackingAvailable{false};
 
         // TODO, P2: Make this tunable.
         float m_peripheralPixelDensity{0.5f};
@@ -1299,6 +1356,9 @@ namespace openxr_api_layer {
 
         std::mutex m_swapchainsMutex;
         std::unordered_map<XrSwapchain, Swapchain> m_swapchains;
+
+        XrEyeTrackerFB m_eyeTrackerFB{XR_NULL_HANDLE};
+        XrSpace m_viewSpace{XR_NULL_HANDLE};
 
         ComPtr<ID3D11SamplerState> m_linearClampSampler;
         ComPtr<ID3D11RasterizerState> m_noDepthRasterizer;
