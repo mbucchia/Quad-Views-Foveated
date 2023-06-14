@@ -15,6 +15,9 @@
     <Filter Include="Utilities">
       <UniqueIdentifier>{6373cac3-099d-4c47-8bd7-9127fde36131}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Shader Files">
+      <UniqueIdentifier>{18c0442a-dcc5-451b-9beb-33acd4efbd5f}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">
@@ -94,5 +97,13 @@
     <None Include="openxr-api-layer-32.json" />
     <None Include="packages.config" />
     <None Include="module.def" />
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="ProjectionVS.hlsl">
+      <Filter>Shader Files</Filter>
+    </FxCompile>
+    <FxCompile Include="ProjectionPS.hlsl">
+      <Filter>Shader Files</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>
