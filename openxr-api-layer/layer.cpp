@@ -1294,6 +1294,30 @@ namespace openxr_api_layer {
             XrSpace viewSpace;
             CHECK_XRCMD(OpenXrApi::xrCreateReferenceSpace(session, &spaceCreateInfo, &viewSpace));
 
+            // Wait for the session to be ready.
+            {
+                while (true) {
+                    XrEventDataBuffer event{XR_TYPE_EVENT_DATA_BUFFER};
+                    const XrResult result = OpenXrApi::xrPollEvent(GetXrInstance(), &event);
+                    if (result == XR_SUCCESS) {
+                        if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
+                            const XrEventDataSessionStateChanged& sessionEvent =
+                                *reinterpret_cast<XrEventDataSessionStateChanged*>(&event);
+
+                            if (sessionEvent.state == XR_SESSION_STATE_READY) {
+                                break;
+                            }
+                        }
+                    }
+                    CHECK_XRCMD(result);
+
+                    // TODO, P3: Need some sort of timeout.
+                    if (result == XR_EVENT_UNAVAILABLE) {
+                        std::this_thread::sleep_for(100ms);
+                    }
+                }
+            }
+
             XrSessionBeginInfo beginSessionInfo{XR_TYPE_SESSION_BEGIN_INFO};
             beginSessionInfo.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
             CHECK_XRCMD(OpenXrApi::xrBeginSession(session, &beginSessionInfo));
@@ -1321,7 +1345,17 @@ namespace openxr_api_layer {
 
             CHECK_XRCMD(OpenXrApi::xrDestroySession(session));
 
-            // TODO, P2: Do we need to purge events?
+            // Purge events for this session.
+            // TODO, P3: This might steal legitimate events from the runtime.
+            {
+                while (true) {
+                    XrEventDataBuffer event{XR_TYPE_EVENT_DATA_BUFFER};
+                    const XrResult result = OpenXrApi::xrPollEvent(GetXrInstance(), &event);
+                    if (result == XR_EVENT_UNAVAILABLE) {
+                        break;
+                    }
+                }
+            }
 
             for (uint32_t eye = 0; eye < xr::StereoView::Count; eye++) {
                 m_cachedEyeFov[eye] = view[eye].fov;
