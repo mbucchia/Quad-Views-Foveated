@@ -512,11 +512,15 @@ namespace openxr_api_layer {
             const XrResult result = OpenXrApi::xrDestroySession(session);
 
             if (XR_SUCCEEDED(result)) {
+                m_layerContextState.Reset();
                 m_linearClampSampler.Reset();
                 m_noDepthRasterizer.Reset();
                 m_projectionConstants.Reset();
                 m_projectionVS.Reset();
                 m_projectionPS.Reset();
+
+                m_applicationDevice.Reset();
+                m_renderContext.Reset();
 
                 m_swapchains.clear();
             }
@@ -1065,10 +1069,19 @@ namespace openxr_api_layer {
             }
 
             // Grab a D3D context.
-            ComPtr<ID3D11Device> device;
-            destinationImage->GetDevice(device.ReleaseAndGetAddressOf());
-            ComPtr<ID3D11DeviceContext> context;
-            device->GetImmediateContext(context.ReleaseAndGetAddressOf());
+            {
+                ComPtr<ID3D11Device> device;
+                destinationImage->GetDevice(device.ReleaseAndGetAddressOf());
+
+                if (!m_applicationDevice) {
+                    initializeCompositionResources(device.Get());
+                }
+            }
+
+            // Save the application context state.
+            ComPtr<ID3DDeviceContextState> applicationContextState;
+            m_renderContext->SwapDeviceContextState(m_layerContextState.Get(),
+                                                    applicationContextState.ReleaseAndGetAddressOf());
 
             // Copy to a flat texture for sampling.
             if (!swapchain.flatImage) {
@@ -1080,7 +1093,8 @@ namespace openxr_api_layer {
                 desc.MipLevels = 1;
                 desc.SampleDesc.Count = 1;
                 desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-                CHECK_HRCMD(device->CreateTexture2D(&desc, nullptr, swapchain.flatImage.ReleaseAndGetAddressOf()));
+                CHECK_HRCMD(
+                    m_applicationDevice->CreateTexture2D(&desc, nullptr, swapchain.flatImage.ReleaseAndGetAddressOf()));
             }
             D3D11_BOX box{};
             box.left = view.subImage.imageRect.offset.x;
@@ -1088,7 +1102,7 @@ namespace openxr_api_layer {
             box.right = box.left + view.subImage.imageRect.extent.width;
             box.bottom = box.top + view.subImage.imageRect.extent.height;
             box.back = 1;
-            context->CopySubresourceRegion(
+            m_renderContext->CopySubresourceRegion(
                 swapchain.flatImage.Get(), 0, 0, 0, 0, sourceImage, view.subImage.imageArrayIndex, &box);
 
             // Create ephemeral SRV/RTV.
@@ -1098,8 +1112,8 @@ namespace openxr_api_layer {
                 desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
                 desc.Format = (DXGI_FORMAT)swapchain.createInfo.format;
                 desc.Texture2D.MipLevels = 1;
-                CHECK_HRCMD(
-                    device->CreateShaderResourceView(swapchain.flatImage.Get(), &desc, srv.ReleaseAndGetAddressOf()));
+                CHECK_HRCMD(m_applicationDevice->CreateShaderResourceView(
+                    swapchain.flatImage.Get(), &desc, srv.ReleaseAndGetAddressOf()));
             }
 
             ComPtr<ID3D11RenderTargetView> rtv;
@@ -1107,17 +1121,13 @@ namespace openxr_api_layer {
                 D3D11_RENDER_TARGET_VIEW_DESC desc{};
                 desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
                 desc.Format = (DXGI_FORMAT)swapchain.createInfo.format;
-                CHECK_HRCMD(device->CreateRenderTargetView(destinationImage, &desc, rtv.ReleaseAndGetAddressOf()));
+                CHECK_HRCMD(
+                    m_applicationDevice->CreateRenderTargetView(destinationImage, &desc, rtv.ReleaseAndGetAddressOf()));
             }
 
             // Clear the destination.
             const float transparent[] = {0, 0, 0, 0};
-            context->ClearRenderTargetView(rtv.Get(), transparent);
-
-            // TODO (P0): Save/restore context.
-            if (!m_projectionVS) {
-                initializeCompositionResources(device.Get());
-            }
+            m_renderContext->ClearRenderTargetView(rtv.Get(), transparent);
 
             // Compute the projection.
             ProjectionConstants projection;
@@ -1133,40 +1143,62 @@ namespace openxr_api_layer {
             }
             {
                 D3D11_MAPPED_SUBRESOURCE mappedResources;
-                CHECK_HRCMD(context->Map(m_projectionConstants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResources));
+                CHECK_HRCMD(
+                    m_renderContext->Map(m_projectionConstants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResources));
                 memcpy(mappedResources.pData, &projection, sizeof(projection));
-                context->Unmap(m_projectionConstants.Get(), 0);
+                m_renderContext->Unmap(m_projectionConstants.Get(), 0);
             }
 
             // Dispatch the composition shader.
-            context->ClearState();
-            context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-            context->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
-            context->RSSetState(m_noDepthRasterizer.Get());
+            m_renderContext->ClearState();
+            m_renderContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+            m_renderContext->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
+            m_renderContext->RSSetState(m_noDepthRasterizer.Get());
             D3D11_VIEWPORT viewport{};
             viewport.Width = (float)m_fullFovResolution.width;
             viewport.Height = (float)m_fullFovResolution.height;
             viewport.MaxDepth = 1.f;
-            context->RSSetViewports(1, &viewport);
-            context->VSSetConstantBuffers(0, 1, m_projectionConstants.GetAddressOf());
-            context->VSSetShader(m_projectionVS.Get(), nullptr, 0);
-            context->PSSetSamplers(0, 1, m_linearClampSampler.GetAddressOf());
-            context->PSSetShaderResources(0, 1, srv.GetAddressOf());
-            context->PSSetShader(m_projectionPS.Get(), nullptr, 0);
-            context->Draw(3, 0);
+            m_renderContext->RSSetViewports(1, &viewport);
+            m_renderContext->VSSetConstantBuffers(0, 1, m_projectionConstants.GetAddressOf());
+            m_renderContext->VSSetShader(m_projectionVS.Get(), nullptr, 0);
+            m_renderContext->PSSetSamplers(0, 1, m_linearClampSampler.GetAddressOf());
+            m_renderContext->PSSetShaderResources(0, 1, srv.GetAddressOf());
+            m_renderContext->PSSetShader(m_projectionPS.Get(), nullptr, 0);
+            m_renderContext->Draw(3, 0);
 
-            // Unbind all resources to avoid D3D validation errors.
-            {
-                ID3D11RenderTargetView* nullRTV[] = {nullptr};
-                context->OMSetRenderTargets(1, nullRTV, nullptr);
-                ID3D11ShaderResourceView* nullSRV[] = {nullptr};
-                context->PSSetShaderResources(0, 1, nullSRV);
-            }
+            // Restore the application context state.
+            m_renderContext->SwapDeviceContextState(applicationContextState.Get(), nullptr);
 
             CHECK_XRCMD(OpenXrApi::xrReleaseSwapchainImage(swapchain.fullFovSwapchain, nullptr));
         }
 
         void initializeCompositionResources(ID3D11Device* device) {
+            {
+                UINT creationFlags = 0;
+                if (device->GetCreationFlags() & D3D11_CREATE_DEVICE_SINGLETHREADED) {
+                    creationFlags |= D3D11_1_CREATE_DEVICE_CONTEXT_STATE_SINGLETHREADED;
+                }
+                const D3D_FEATURE_LEVEL featureLevel = device->GetFeatureLevel();
+
+                CHECK_HRCMD(device->QueryInterface(m_applicationDevice.ReleaseAndGetAddressOf()));
+
+                CHECK_HRCMD(device->QueryInterface(m_applicationDevice.ReleaseAndGetAddressOf()));
+
+                // Create a switchable context state for the API layer.
+                CHECK_HRCMD(
+                    m_applicationDevice->CreateDeviceContextState(creationFlags,
+                                                                  &featureLevel,
+                                                                  1,
+                                                                  D3D11_SDK_VERSION,
+                                                                  __uuidof(ID3D11Device),
+                                                                  nullptr,
+                                                                  m_layerContextState.ReleaseAndGetAddressOf()));
+            }
+            {
+                ComPtr<ID3D11DeviceContext> context;
+                device->GetImmediateContext(context.ReleaseAndGetAddressOf());
+                CHECK_HRCMD(context->QueryInterface(m_renderContext.ReleaseAndGetAddressOf()));
+            }
             {
                 D3D11_SAMPLER_DESC desc;
                 ZeroMemory(&desc, sizeof(desc));
@@ -1394,6 +1426,9 @@ namespace openxr_api_layer {
         XrEyeTrackerFB m_eyeTrackerFB{XR_NULL_HANDLE};
         XrSpace m_viewSpace{XR_NULL_HANDLE};
 
+        ComPtr<ID3D11Device5> m_applicationDevice;
+        ComPtr<ID3D11DeviceContext4> m_renderContext;
+        ComPtr<ID3DDeviceContextState> m_layerContextState;
         ComPtr<ID3D11SamplerState> m_linearClampSampler;
         ComPtr<ID3D11RasterizerState> m_noDepthRasterizer;
         ComPtr<ID3D11Buffer> m_projectionConstants;
