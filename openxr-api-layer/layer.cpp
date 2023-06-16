@@ -126,6 +126,9 @@ namespace openxr_api_layer {
             TraceLoggingWrite(g_traceProvider, "xrCreateInstance", TLArg(runtimeName.c_str(), "RuntimeName"));
             Log(fmt::format("Using OpenXR runtime: {}\n", runtimeName));
 
+            // Game-specific quirks.
+            m_needFocusFovCorrectionQuirk = GetApplicationName() == "DCS World";
+
             return XR_SUCCESS;
         }
 
@@ -679,6 +682,17 @@ namespace openxr_api_layer {
                                                       centerOfFov.y);
                                     }
                                 }
+
+                                // Quirk for DCS World: the application does not pass the correct FOV for the focus
+                                // views in xrEndFrame(). We must keep track of the correct values for each frame.
+                                if (m_needFocusFovCorrectionQuirk) {
+                                    std::unique_lock lock(m_focusFovMutex);
+
+                                    m_focusFovForDisplayTime.insert_or_assign(
+                                        viewLocateInfo->displayTime,
+                                        std::make_pair(views[xr::QuadView::FocusLeft].fov,
+                                                       views[xr::QuadView::FocusRight].fov));
+                                }
                             }
                         }
                     } else {
@@ -889,8 +903,22 @@ namespace openxr_api_layer {
                                             session, &createInfo, &entry.fullFovSwapchain));
                                     }
 
+                                    XrCompositionLayerProjectionView view = proj->views[viewIndex];
+                                    if (m_needFocusFovCorrectionQuirk && viewIndex >= xr::StereoView::Count) {
+                                        // Quirk for DCS World: the application does not pass the correct FOV for the
+                                        // focus views in xrEndFrame(). We must keep track of the correct values for
+                                        // each frame.
+                                        std::unique_lock lock(m_focusFovMutex);
+
+                                        const auto& cit = m_focusFovForDisplayTime.find(frameEndInfo->displayTime);
+                                        if (cit != m_focusFovForDisplayTime.cend()) {
+                                            view.fov = viewIndex == xr::QuadView::FocusLeft ? cit->second.first
+                                                                                            : cit->second.second;
+                                        }
+                                    }
+
                                     // Relocate the view's content to a full FOV texture.
-                                    relocateViewContent(proj->views[viewIndex], entry, referenceViewIndex);
+                                    relocateViewContent(view, entry, referenceViewIndex);
 
                                     // Patch the view to reference the new swapchain at full FOV.
                                     XrCompositionLayerProjectionView& patchedView =
@@ -931,6 +959,19 @@ namespace openxr_api_layer {
 
                 chainFrameEndInfo.layers = layers.data();
                 chainFrameEndInfo.layerCount = (uint32_t)layers.size();
+
+                if (m_needFocusFovCorrectionQuirk) {
+                    std::unique_lock lock(m_focusFovMutex);
+
+                    // Delete all entries older than 1s.
+                    while (!m_focusFovForDisplayTime.empty() &&
+                           m_focusFovForDisplayTime.cbegin()->first < frameEndInfo->displayTime - 1'000'000'000) {
+                        m_focusFovForDisplayTime.erase(m_focusFovForDisplayTime.begin());
+                    }
+                    TraceLoggingWrite(g_traceProvider,
+                                      "xrEndFrame",
+                                      TLArg(m_focusFovForDisplayTime.size(), "FovForDisplayTimeDictionarySize"));
+                }
             }
 
             const XrResult result = OpenXrApi::xrEndFrame(session, &chainFrameEndInfo);
@@ -1434,6 +1475,11 @@ namespace openxr_api_layer {
         ComPtr<ID3D11Buffer> m_projectionConstants;
         ComPtr<ID3D11VertexShader> m_projectionVS;
         ComPtr<ID3D11PixelShader> m_projectionPS;
+
+        // FOV submission quirk.
+        bool m_needFocusFovCorrectionQuirk{false};
+        std::mutex m_focusFovMutex;
+        std::map<XrTime, std::pair<XrFovf, XrFovf>> m_focusFovForDisplayTime;
 
         bool m_debugFocusView{false};
     };
