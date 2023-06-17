@@ -16,6 +16,8 @@ override_functions = [
     "xrReleaseSwapchainImage",
     "xrLocateViews",
     "xrLocateSpace",
+    "xrWaitFrame",
+    "xrBeginFrame",
     "xrEndFrame",
     "xrPollEvent",
     "xrGetVisibilityMaskKHR",
@@ -28,8 +30,6 @@ requested_functions = [
     "xrGetD3D11GraphicsRequirementsKHR",
     "xrEnumerateSwapchainImages",
     "xrWaitSwapchainImage",
-    "xrWaitFrame",
-    "xrBeginFrame",
     "xrCreateEyeTrackerFB",
     "xrGetEyeGazesFB",
 ]

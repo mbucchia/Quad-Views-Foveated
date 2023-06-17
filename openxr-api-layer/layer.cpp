@@ -515,6 +515,17 @@ namespace openxr_api_layer {
         XrResult xrDestroySession(XrSession session) override {
             TraceLoggingWrite(g_traceProvider, "xrDestroySession", TLXArg(session, "Session"));
 
+            // Wait for deferred frames to finish before teardown.
+            if (m_asyncWaitPromise.valid()) {
+                TraceLocalActivity(local);
+
+                TraceLoggingWriteStart(local, "AsyncWaitNow");
+                m_asyncWaitPromise.wait_for(5s);
+                TraceLoggingWriteStop(local, "AsyncWaitNow");
+
+                m_asyncWaitPromise = {};
+            }
+
             const XrResult result = OpenXrApi::xrDestroySession(session);
 
             if (XR_SUCCEEDED(result)) {
@@ -773,6 +784,19 @@ namespace openxr_api_layer {
         XrResult xrDestroySwapchain(XrSwapchain swapchain) override {
             TraceLoggingWrite(g_traceProvider, "xrDestroySwapchain", TLXArg(swapchain, "Swapchain"));
 
+            // In Turbo Mode, make sure there is no pending frame that may potentially hold onto the swapchain.
+            {
+                std::unique_lock lock(m_frameMutex);
+
+                if (m_asyncWaitPromise.valid()) {
+                    TraceLocalActivity(local);
+
+                    TraceLoggingWriteStart(local, "AsyncWaitNow");
+                    m_asyncWaitPromise.wait();
+                    TraceLoggingWriteStop(local, "AsyncWaitNow");
+                }
+            }
+
             const XrResult result = OpenXrApi::xrDestroySwapchain(swapchain);
 
             if (XR_SUCCEEDED(result)) {
@@ -821,6 +845,97 @@ namespace openxr_api_layer {
                 Swapchain& entry = m_swapchains[swapchain];
                 entry.lastReleasedIndex = entry.acquiredIndex.front();
                 entry.acquiredIndex.pop_front();
+            }
+
+            return result;
+        }
+
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrWaitFrame
+        XrResult xrWaitFrame(XrSession session,
+                             const XrFrameWaitInfo* frameWaitInfo,
+                             XrFrameState* frameState) override {
+            TraceLoggingWrite(g_traceProvider, "xrWaitFrame", TLXArg(session, "Session"));
+
+            const auto lastFrameWaitTimestamp = m_lastFrameWaitTimestamp;
+            m_lastFrameWaitTimestamp = std::chrono::steady_clock::now();
+
+            XrResult result = XR_ERROR_RUNTIME_FAILURE;
+            {
+                std::unique_lock lock(m_frameMutex);
+
+                if (m_asyncWaitPromise.valid()) {
+                    TraceLoggingWrite(g_traceProvider, "AsyncWaitMode");
+
+                    // In Turbo mode, we accept pipelining of exactly one frame.
+                    if (m_asyncWaitPolled) {
+                        TraceLocalActivity(local);
+
+                        // On second frame poll, we must wait.
+                        TraceLoggingWriteStart(local, "AsyncWaitNow");
+                        m_asyncWaitPromise.wait();
+                        TraceLoggingWriteStop(local, "AsyncWaitNow");
+                    }
+                    m_asyncWaitPolled = true;
+
+                    // In Turbo mode, we don't actually wait, we make up a predicted time.
+                    {
+                        std::unique_lock lock(m_asyncWaitMutex);
+
+                        frameState->predictedDisplayTime =
+                            m_asyncWaitCompleted ? m_lastPredictedDisplayTime
+                                                 : (m_lastPredictedDisplayTime +
+                                                    (m_lastFrameWaitTimestamp - lastFrameWaitTimestamp).count());
+                        frameState->predictedDisplayPeriod = m_lastPredictedDisplayPeriod;
+                    }
+                    frameState->shouldRender = XR_TRUE;
+
+                    result = XR_SUCCESS;
+
+                } else {
+                    lock.unlock();
+                    result = OpenXrApi::xrWaitFrame(session, frameWaitInfo, frameState);
+                    lock.lock();
+
+                    if (XR_SUCCEEDED(result)) {
+                        // We must always store those values to properly handle transitions into Turbo Mode.
+                        m_lastPredictedDisplayTime = frameState->predictedDisplayTime;
+                        m_lastPredictedDisplayPeriod = frameState->predictedDisplayPeriod;
+                    }
+                }
+            }
+
+            if (XR_SUCCEEDED(result)) {
+                // Per OpenXR spec, the predicted display must increase monotonically.
+                frameState->predictedDisplayTime = std::max(frameState->predictedDisplayTime, m_waitedFrameTime + 1);
+
+                // Record the predicted display time.
+                m_waitedFrameTime = frameState->predictedDisplayTime;
+
+                TraceLoggingWrite(g_traceProvider,
+                                  "xrWaitFrame",
+                                  TLArg(!!frameState->shouldRender, "ShouldRender"),
+                                  TLArg(frameState->predictedDisplayTime, "PredictedDisplayTime"),
+                                  TLArg(frameState->predictedDisplayPeriod, "PredictedDisplayPeriod"));
+            }
+
+            return result;
+        }
+
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrBeginFrame
+        XrResult xrBeginFrame(XrSession session, const XrFrameBeginInfo* frameBeginInfo) override {
+            TraceLoggingWrite(g_traceProvider, "xrBeginFrame", TLXArg(session, "Session"));
+
+            XrResult result = XR_ERROR_RUNTIME_FAILURE;
+            {
+                std::unique_lock lock(m_frameMutex);
+
+                if (m_asyncWaitPromise.valid()) {
+                    // In turbo mode, we do nothing here.
+                    TraceLoggingWrite(g_traceProvider, "AsyncWaitMode");
+                    result = XR_SUCCESS;
+                } else {
+                    result = OpenXrApi::xrBeginFrame(session, frameBeginInfo);
+                }
             }
 
             return result;
@@ -981,7 +1096,58 @@ namespace openxr_api_layer {
                 }
             }
 
-            const XrResult result = OpenXrApi::xrEndFrame(session, &chainFrameEndInfo);
+            XrResult result = XR_ERROR_RUNTIME_FAILURE;
+            {
+                std::unique_lock lock(m_frameMutex);
+
+                if (m_asyncWaitPromise.valid()) {
+                    TraceLocalActivity(local);
+
+                    // This is the latest point we must have fully waited a frame before proceeding.
+                    //
+                    // Note: we should not wait infinitely here, however certain patterns of engine calls may cause us
+                    // to attempt a "double xrWaitFrame" when turning on Turbo. Use a timeout to detect that, and
+                    // refrain from enqueing a second wait further down. This isn't a pretty solution, but it is simple
+                    // and it seems to work effectively (minus the 1s freeze observed in-game).
+                    TraceLoggingWriteStart(local, "AsyncWaitNow");
+                    const auto ready = m_asyncWaitPromise.wait_for(1s) == std::future_status::ready;
+                    TraceLoggingWriteStop(local, "AsyncWaitNow", TLArg(ready, "Ready"));
+                    if (ready) {
+                        m_asyncWaitPromise = {};
+                    }
+
+                    CHECK_XRCMD(OpenXrApi::xrBeginFrame(session, nullptr));
+                }
+
+                result = OpenXrApi::xrEndFrame(session, &chainFrameEndInfo);
+
+                if (m_useTurboMode && !m_asyncWaitPromise.valid()) {
+                    m_asyncWaitPolled = false;
+                    m_asyncWaitCompleted = false;
+
+                    // In Turbo mode, we kick off a wait thread immediately.
+                    TraceLoggingWrite(g_traceProvider, "AsyncWaitStart");
+                    m_asyncWaitPromise = std::async(std::launch::async, [&, session] {
+                        TraceLocalActivity(local);
+
+                        XrFrameState frameState{XR_TYPE_FRAME_STATE};
+                        TraceLoggingWriteStart(local, "AsyncWaitFrame");
+                        CHECK_XRCMD(OpenXrApi::xrWaitFrame(session, nullptr, &frameState));
+                        TraceLoggingWriteStop(local,
+                                              "AsyncWaitFrame",
+                                              TLArg(frameState.predictedDisplayTime, "PredictedDisplayTime"),
+                                              TLArg(frameState.predictedDisplayPeriod, "PredictedDisplayPeriod"));
+                        {
+                            std::unique_lock lock(m_asyncWaitMutex);
+
+                            m_lastPredictedDisplayTime = frameState.predictedDisplayTime;
+                            m_lastPredictedDisplayPeriod = frameState.predictedDisplayPeriod;
+
+                            m_asyncWaitCompleted = true;
+                        }
+                    });
+                }
+            }
 
             return result;
         }
@@ -1502,6 +1668,9 @@ namespace openxr_api_layer {
                     } else if (name == "prefer_foveated_rendering") {
                         m_preferFoveatedRendering = std::stoi(value);
                         parsed = true;
+                    } else if (name == "turbo_mode") {
+                        m_useTurboMode = std::stoi(value);
+                        parsed = true;
                     } else if (name == "debug_focus_view") {
                         m_debugFocusView = std::stoi(value);
                         parsed = true;
@@ -1533,6 +1702,7 @@ namespace openxr_api_layer {
         float m_horizontalFovSection[2]{0.75f, 0.5f};
         float m_verticalFovSection[2]{0.7f, 0.5f};
         bool m_preferFoveatedRendering{true};
+        bool m_useTurboMode{false};
 
         bool m_needComputeBaseFov{true};
         // [0] = left, [1] = right
@@ -1558,6 +1728,17 @@ namespace openxr_api_layer {
         ComPtr<ID3D11Buffer> m_projectionConstants;
         ComPtr<ID3D11VertexShader> m_projectionVS;
         ComPtr<ID3D11PixelShader> m_projectionPS;
+
+        // Turbo mode.
+        std::chrono::time_point<std::chrono::steady_clock> m_lastFrameWaitTimestamp{};
+        std::mutex m_frameMutex;
+        XrTime m_waitedFrameTime;
+        std::mutex m_asyncWaitMutex;
+        std::future<void> m_asyncWaitPromise;
+        XrTime m_lastPredictedDisplayTime{0};
+        XrTime m_lastPredictedDisplayPeriod{0};
+        bool m_asyncWaitPolled{false};
+        bool m_asyncWaitCompleted{false};
 
         // FOV submission quirk.
         bool m_needFocusFovCorrectionQuirk{false};
