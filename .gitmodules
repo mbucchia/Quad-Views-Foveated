@@ -10,3 +10,6 @@
 [submodule "external/FidelityFX-CAS"]
 	path = external/FidelityFX-CAS
 	url = https://github.com/GPUOpen-Effects/FidelityFX-CAS.git
+[submodule "external/Omnicept-SDK"]
+	path = external/Omnicept-SDK
+	url = https://github.com/mbucchia/Omnicept-SDK.git

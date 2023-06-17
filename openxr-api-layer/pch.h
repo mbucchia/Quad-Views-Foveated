@@ -92,6 +92,9 @@ using Microsoft::WRL::ComPtr;
 // FMT formatter.
 #include <fmt/format.h>
 
+// HP Omnicept SDK
+#include <omnicept/Glia.h>
+
 #if defined(XR_USE_GRAPHICS_API_D3D11) || defined(XR_USE_GRAPHICS_API_D3D12)
 // Utilities framework.
 #include <utils/graphics.h>

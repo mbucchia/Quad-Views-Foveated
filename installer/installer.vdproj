@@ -33,6 +33,12 @@
         }
         "Entry"
         {
+        "MsmKey" = "8:_2287095E7A84461186968C7F0DA4CF3F"
+        "OwnerKey" = "8:_UNDEFINED"
+        "MsmSig" = "8:_UNDEFINED"
+        }
+        "Entry"
+        {
         "MsmKey" = "8:_315BC6BD0026495CAD1357DC2E7719DF"
         "OwnerKey" = "8:_UNDEFINED"
         "MsmSig" = "8:_UNDEFINED"
@@ -52,6 +58,12 @@
         "Entry"
         {
         "MsmKey" = "8:_783F0578410447B490A7B578316FEA5D"
+        "OwnerKey" = "8:_UNDEFINED"
+        "MsmSig" = "8:_UNDEFINED"
+        }
+        "Entry"
+        {
+        "MsmKey" = "8:_9CF4D55FDD084BF993557F0FA42AE537"
         "OwnerKey" = "8:_UNDEFINED"
         "MsmSig" = "8:_UNDEFINED"
         }
@@ -229,6 +241,26 @@
             "IsDependency" = "11:FALSE"
             "IsolateTo" = "8:"
             }
+            "{1FB2D0AE-D3B9-43D4-B9DD-F88EC61E35DE}:_2287095E7A84461186968C7F0DA4CF3F"
+            {
+            "SourcePath" = "8:..\\bin\\x64\\Release\\jsoncpp.dll"
+            "TargetName" = "8:jsoncpp.dll"
+            "Tag" = "8:"
+            "Folder" = "8:_505DF0FD526F4594B101F5A5B0F2DC83"
+            "Condition" = "8:"
+            "Transitive" = "11:FALSE"
+            "Vital" = "11:TRUE"
+            "ReadOnly" = "11:FALSE"
+            "Hidden" = "11:FALSE"
+            "System" = "11:FALSE"
+            "Permanent" = "11:FALSE"
+            "SharedLegacy" = "11:FALSE"
+            "PackageAs" = "3:1"
+            "Register" = "3:1"
+            "Exclude" = "11:FALSE"
+            "IsDependency" = "11:FALSE"
+            "IsolateTo" = "8:"
+            }
             "{1FB2D0AE-D3B9-43D4-B9DD-F88EC61E35DE}:_315BC6BD0026495CAD1357DC2E7719DF"
             {
             "SourcePath" = "8:..\\scripts\\Tracing.wprp"
@@ -293,6 +325,26 @@
             {
             "SourcePath" = "8:..\\THIRD_PARTY"
             "TargetName" = "8:THIRD_PARTY"
+            "Tag" = "8:"
+            "Folder" = "8:_505DF0FD526F4594B101F5A5B0F2DC83"
+            "Condition" = "8:"
+            "Transitive" = "11:FALSE"
+            "Vital" = "11:TRUE"
+            "ReadOnly" = "11:FALSE"
+            "Hidden" = "11:FALSE"
+            "System" = "11:FALSE"
+            "Permanent" = "11:FALSE"
+            "SharedLegacy" = "11:FALSE"
+            "PackageAs" = "3:1"
+            "Register" = "3:1"
+            "Exclude" = "11:FALSE"
+            "IsDependency" = "11:FALSE"
+            "IsolateTo" = "8:"
+            }
+            "{1FB2D0AE-D3B9-43D4-B9DD-F88EC61E35DE}:_9CF4D55FDD084BF993557F0FA42AE537"
+            {
+            "SourcePath" = "8:..\\bin\\x64\\Release\\libzmq-mt-4_3_3.dll"
+            "TargetName" = "8:libzmq-mt-4_3_3.dll"
             "Tag" = "8:"
             "Folder" = "8:_505DF0FD526F4594B101F5A5B0F2DC83"
             "Condition" = "8:"
