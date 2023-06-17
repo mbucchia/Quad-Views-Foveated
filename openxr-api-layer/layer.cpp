@@ -1288,10 +1288,10 @@ namespace openxr_api_layer {
             return result;
         }
 
-#if 0
         // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrPollEvent
         XrResult xrPollEvent(XrInstance instance, XrEventDataBuffer* eventData) override {
-            // TODO, P2: Block/translate visibility mask events.
+            // TODO: Block/translate visibility mask events.
+            return OpenXrApi::xrPollEvent(instance, eventData);
         }
 
         // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrGetVisibilityMaskKHR
@@ -1300,9 +1300,42 @@ namespace openxr_api_layer {
                                         uint32_t viewIndex,
                                         XrVisibilityMaskTypeKHR visibilityMaskType,
                                         XrVisibilityMaskKHR* visibilityMask) override {
-            // TODO, P2: Translate visibility mask requests.
+            if (visibilityMask->type != XR_TYPE_VISIBILITY_MASK_KHR) {
+                return XR_ERROR_VALIDATION_FAILURE;
+            }
+
+            TraceLoggingWrite(g_traceProvider,
+                              "xrGetVisibilityMaskKHR",
+                              TLXArg(session, "Session"),
+                              TLArg(xr::ToCString(viewConfigurationType), "ViewConfigurationType"),
+                              TLArg(viewIndex, "ViewIndex"),
+                              TLArg(xr::ToCString(visibilityMaskType), "VisibilityMaskType"),
+                              TLArg(visibilityMask->vertexCapacityInput, "VertexCapacityInput"),
+                              TLArg(visibilityMask->indexCapacityInput, "IndexCapacityInput"));
+
+            XrResult result = XR_ERROR_RUNTIME_FAILURE;
+            if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO && viewIndex >= xr::StereoView::Count) {
+                // No mask on the focus view.
+                if (viewIndex == xr::QuadView::FocusLeft || viewIndex == xr::QuadView::FocusRight) {
+                    visibilityMask->vertexCountOutput = 0;
+                    visibilityMask->indexCountOutput = 0;
+
+                    result = XR_SUCCESS;
+                } else {
+                    result = XR_ERROR_VALIDATION_FAILURE;
+                }
+            } else {
+                // We will implement quad views on top of stereo. Use the regular mask for the peripheral view.
+                if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+                    viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+                }
+
+                result = OpenXrApi::xrGetVisibilityMaskKHR(
+                    session, viewConfigurationType, viewIndex, visibilityMaskType, visibilityMask);
+            }
+
+            return result;
         }
-#endif
 
       private:
         struct Swapchain {
