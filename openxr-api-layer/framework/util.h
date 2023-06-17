@@ -46,12 +46,18 @@ namespace xr {
             "(l:{:.3f}, r:{:.3f}, u:{:.3f}, d:{:.3f})", fov.angleLeft, fov.angleRight, fov.angleUp, fov.angleDown);
     }
 
+    static inline std::string ToString(const XrVector3f& vec) {
+        return fmt::format("({:.3f}, {:.3f}, {:.3f})", vec.x, vec.y, vec.z);
+    }
+
     static inline std::string ToString(XrRect2Di rect) {
-        return fmt::format("x:{}, y:{}, w:{}, h:{}", rect.offset.x, rect.offset.y, rect.extent.width, rect.extent.height);
+        return fmt::format(
+            "x:{}, y:{}, w:{}, h:{}", rect.offset.x, rect.offset.y, rect.extent.width, rect.extent.height);
     }
 
     static inline std::string ToString(XrRect2Df rect) {
-        return fmt::format("x:{}, y:{}, w:{}, h:{}", rect.offset.x, rect.offset.y, rect.extent.width, rect.extent.height);
+        return fmt::format(
+            "x:{}, y:{}, w:{}, h:{}", rect.offset.x, rect.offset.y, rect.extent.width, rect.extent.height);
     }
 
 } // namespace xr

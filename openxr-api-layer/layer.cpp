@@ -652,9 +652,13 @@ namespace openxr_api_layer {
                                     const uint32_t stereoViewIndex = i - xr::StereoView::Count;
 
                                     views[i].pose = views[stereoViewIndex].pose;
+
+                                    XrView viewForGazeProjection{};
+                                    viewForGazeProjection.pose = m_cachedEyePoses[stereoViewIndex];
+                                    viewForGazeProjection.fov = views[stereoViewIndex].fov;
                                     XrVector2f projectedGaze;
                                     if (!isGazeValid ||
-                                        !ProjectPoint(views[stereoViewIndex], gazeUnitVector, projectedGaze)) {
+                                        !ProjectPoint(viewForGazeProjection, gazeUnitVector, projectedGaze)) {
                                         views[i].fov = m_cachedEyeFov[i];
 
                                     } else {
@@ -1045,7 +1049,7 @@ namespace openxr_api_layer {
                     DirectX::XMVector3Transform(DirectX::XMVectorSet(0.f, 0.f, 1.f, 1.f), gaze);
 
                 unitVector.x = gazeProjectedPoint.m128_f32[0];
-                unitVector.y = gazeProjectedPoint.m128_f32[1];
+                unitVector.y = -gazeProjectedPoint.m128_f32[1];
                 unitVector.z = gazeProjectedPoint.m128_f32[2];
             }
 #else
@@ -1065,6 +1069,9 @@ namespace openxr_api_layer {
                 unitVector = Normalize({point.x - 0.5f, 0.5f - point.y, -0.35f});
             }
 #endif
+
+            TraceLoggingWrite(
+                g_traceProvider, "xrLocateViews_EyeGaze", TLArg(xr::ToString(unitVector).c_str(), "GazeUnitVector"));
 
             return true;
         }
