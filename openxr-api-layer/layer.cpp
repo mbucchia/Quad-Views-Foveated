@@ -46,8 +46,15 @@ namespace openxr_api_layer {
     const std::vector<std::string> implicitExtensions = {XR_KHR_D3D11_ENABLE_EXTENSION_NAME,
                                                          XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME};
 
-    struct ProjectionConstants {
+    struct ProjectionVSConstants {
         DirectX::XMFLOAT4X4 Projection;
+    };
+
+    struct ProjectionPSConstants {
+        float smoothingArea;
+        bool smoothenEdges;
+        bool isUnpremultipliedAlpha;
+        uint8_t padding[10];
     };
 
     // This class implements our API layer.
@@ -129,6 +136,19 @@ namespace openxr_api_layer {
 
             // Game-specific quirks.
             m_needFocusFovCorrectionQuirk = GetApplicationName() == "DCS World";
+
+            TraceLoggingWrite(g_traceProvider,
+                              "xrCreateInstance",
+                              TLArg(m_peripheralPixelDensity, "PeripheralResolutionFactor"),
+                              TLArg(m_focusPixelDensity, "FocusResolutionFactor"),
+                              TLArg(m_horizontalFovSection[0], "FixedHorizontalSection"),
+                              TLArg(m_verticalFovSection[0], "FixedVerticalSection"),
+                              TLArg(m_horizontalFovSection[1], "FoveatedHorizontalSection"),
+                              TLArg(m_verticalFovSection[1], "FoveatedVerticalSection"),
+                              TLArg(m_preferFoveatedRendering, "PreferFoveatedRendering"),
+                              TLArg(m_smoothenEdges, "SmoothenEdges"),
+                              TLArg(m_smoothingArea, "SmoothingArea"),
+                              TLArg(m_useTurboMode, "TurboMode"));
 
             return XR_SUCCESS;
         }
@@ -526,7 +546,8 @@ namespace openxr_api_layer {
                 m_layerContextState.Reset();
                 m_linearClampSampler.Reset();
                 m_noDepthRasterizer.Reset();
-                m_projectionConstants.Reset();
+                m_projectionVSConstants.Reset();
+                m_projectionPSConstants.Reset();
                 m_projectionVS.Reset();
                 m_projectionPS.Reset();
 
@@ -1037,7 +1058,7 @@ namespace openxr_api_layer {
                                     }
 
                                     // Relocate the view's content to a full FOV texture.
-                                    relocateViewContent(view, entry, referenceViewIndex);
+                                    relocateViewContent(view, entry, proj->layerFlags, referenceViewIndex);
 
                                     // Patch the view to reference the new swapchain at full FOV.
                                     XrCompositionLayerProjectionView& patchedView =
@@ -1062,7 +1083,7 @@ namespace openxr_api_layer {
                                 reinterpret_cast<XrCompositionLayerBaseHeader*>(&projectionAllocator.back()));
                         }
                         projectionAllocator.push_back(*proj);
-                        projectionAllocator.back().layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+                        projectionAllocator.back().layerFlags |= XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
                         projectionAllocator.back().views =
                             projectionViewAllocator.at(projectionViewAllocator.size() - 1).data();
                         projectionAllocator.back().viewCount = xr::StereoView::Count;
@@ -1324,6 +1345,7 @@ namespace openxr_api_layer {
 
         void relocateViewContent(const XrCompositionLayerProjectionView& view,
                                  Swapchain& swapchain,
+                                 XrCompositionLayerFlags layerFlags,
                                  uint32_t referenceViewIndex) {
             // TODO, P3: Support D3D12.
 
@@ -1438,7 +1460,7 @@ namespace openxr_api_layer {
             m_renderContext->ClearRenderTargetView(rtv.Get(), transparent);
 
             // Compute the projection.
-            ProjectionConstants projection;
+            ProjectionVSConstants projection;
             {
                 const DirectX::XMMATRIX baseLayerViewProjection =
                     ComposeProjectionMatrix(m_cachedEyeFov[referenceViewIndex], NearFar{0.1f, 20.f});
@@ -1451,10 +1473,22 @@ namespace openxr_api_layer {
             }
             {
                 D3D11_MAPPED_SUBRESOURCE mappedResources;
-                CHECK_HRCMD(
-                    m_renderContext->Map(m_projectionConstants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResources));
+                CHECK_HRCMD(m_renderContext->Map(
+                    m_projectionVSConstants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResources));
                 memcpy(mappedResources.pData, &projection, sizeof(projection));
-                m_renderContext->Unmap(m_projectionConstants.Get(), 0);
+                m_renderContext->Unmap(m_projectionVSConstants.Get(), 0);
+            }
+
+            ProjectionPSConstants drawing{};
+            drawing.smoothingArea = m_smoothingArea;
+            drawing.smoothenEdges = m_smoothenEdges;
+            drawing.isUnpremultipliedAlpha = layerFlags & XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+            {
+                D3D11_MAPPED_SUBRESOURCE mappedResources;
+                CHECK_HRCMD(m_renderContext->Map(
+                    m_projectionPSConstants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResources));
+                memcpy(mappedResources.pData, &drawing, sizeof(drawing));
+                m_renderContext->Unmap(m_projectionPSConstants.Get(), 0);
             }
 
             // Dispatch the composition shader.
@@ -1467,8 +1501,9 @@ namespace openxr_api_layer {
             viewport.Height = (float)m_fullFovResolution.height;
             viewport.MaxDepth = 1.f;
             m_renderContext->RSSetViewports(1, &viewport);
-            m_renderContext->VSSetConstantBuffers(0, 1, m_projectionConstants.GetAddressOf());
+            m_renderContext->VSSetConstantBuffers(0, 1, m_projectionVSConstants.GetAddressOf());
             m_renderContext->VSSetShader(m_projectionVS.Get(), nullptr, 0);
+            m_renderContext->PSSetConstantBuffers(0, 1, m_projectionPSConstants.GetAddressOf());
             m_renderContext->PSSetSamplers(0, 1, m_linearClampSampler.GetAddressOf());
             m_renderContext->PSSetShaderResources(0, 1, srv.GetAddressOf());
             m_renderContext->PSSetShader(m_projectionPS.Get(), nullptr, 0);
@@ -1529,11 +1564,19 @@ namespace openxr_api_layer {
             }
             {
                 D3D11_BUFFER_DESC desc{};
-                desc.ByteWidth = (UINT)std::max(16ull, sizeof(ProjectionConstants));
+                desc.ByteWidth = (UINT)std::max(16ull, sizeof(ProjectionVSConstants));
                 desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
                 desc.Usage = D3D11_USAGE_DYNAMIC;
                 desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-                CHECK_HRCMD(device->CreateBuffer(&desc, nullptr, m_projectionConstants.ReleaseAndGetAddressOf()));
+                CHECK_HRCMD(device->CreateBuffer(&desc, nullptr, m_projectionVSConstants.ReleaseAndGetAddressOf()));
+            }
+            {
+                D3D11_BUFFER_DESC desc{};
+                desc.ByteWidth = (UINT)std::max(16ull, sizeof(ProjectionPSConstants));
+                desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+                desc.Usage = D3D11_USAGE_DYNAMIC;
+                desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+                CHECK_HRCMD(device->CreateBuffer(&desc, nullptr, m_projectionPSConstants.ReleaseAndGetAddressOf()));
             }
             CHECK_HRCMD(device->CreateVertexShader(
                 g_ProjectionVS, sizeof(g_ProjectionVS), nullptr, m_projectionVS.ReleaseAndGetAddressOf()));
@@ -1759,6 +1802,12 @@ namespace openxr_api_layer {
                     } else if (name == "prefer_foveated_rendering") {
                         m_preferFoveatedRendering = std::stoi(value);
                         parsed = true;
+                    } else if (name == "smoothen_edges") {
+                        m_smoothenEdges = std::stoi(value);
+                        parsed = true;
+                    } else if (name == "smoothing_area") {
+                        m_smoothingArea = std::stof(value);
+                        parsed = true;
                     } else if (name == "turbo_mode") {
                         m_useTurboMode = std::stoi(value);
                         parsed = true;
@@ -1796,6 +1845,8 @@ namespace openxr_api_layer {
         float m_horizontalFovSection[2]{0.75f, 0.5f};
         float m_verticalFovSection[2]{0.7f, 0.5f};
         bool m_preferFoveatedRendering{true};
+        bool m_smoothenEdges{true};
+        float m_smoothingArea{0.03f};
         bool m_useTurboMode{false};
 
         bool m_needComputeBaseFov{true};
@@ -1822,7 +1873,8 @@ namespace openxr_api_layer {
         ComPtr<ID3DDeviceContextState> m_layerContextState;
         ComPtr<ID3D11SamplerState> m_linearClampSampler;
         ComPtr<ID3D11RasterizerState> m_noDepthRasterizer;
-        ComPtr<ID3D11Buffer> m_projectionConstants;
+        ComPtr<ID3D11Buffer> m_projectionVSConstants;
+        ComPtr<ID3D11Buffer> m_projectionPSConstants;
         ComPtr<ID3D11VertexShader> m_projectionVS;
         ComPtr<ID3D11PixelShader> m_projectionPS;
 
