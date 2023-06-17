@@ -34,8 +34,6 @@
 #include <ProjectionVS.h>
 #include <ProjectionPS.h>
 
-//#define DEBUG_WITHOUT_TRACKER
-
 namespace openxr_api_layer {
 
     using namespace log;
@@ -160,11 +158,7 @@ namespace openxr_api_layer {
                                   TLArg(systemProperties.systemName, "SystemName"),
                                   TLArg(eyeTrackingProperties.supportsEyeTracking, "SupportsEyeTracking"));
 
-#ifndef DEBUG_WITHOUT_TRACKER
-                m_isEyeTrackingAvailable = eyeTrackingProperties.supportsEyeTracking;
-#else
-                m_isEyeTrackingAvailable = true;
-#endif
+                m_isEyeTrackingAvailable = m_debugSimulateTracking || eyeTrackingProperties.supportsEyeTracking;
 
                 static bool wasSystemLogged = false;
                 if (!wasSystemLogged) {
@@ -568,15 +562,15 @@ namespace openxr_api_layer {
 
             if (XR_SUCCEEDED(result)) {
                 if (m_isEyeTrackingAvailable) {
-#ifndef DEBUG_WITHOUT_TRACKER
-                    XrEyeTrackerCreateInfoFB createInfo{XR_TYPE_EYE_TRACKER_CREATE_INFO_FB};
-                    CHECK_XRCMD(OpenXrApi::xrCreateEyeTrackerFB(session, &createInfo, &m_eyeTrackerFB));
+                    if (!m_debugSimulateTracking) {
+                        XrEyeTrackerCreateInfoFB createInfo{XR_TYPE_EYE_TRACKER_CREATE_INFO_FB};
+                        CHECK_XRCMD(OpenXrApi::xrCreateEyeTrackerFB(session, &createInfo, &m_eyeTrackerFB));
 
-                    XrReferenceSpaceCreateInfo spaceCreateInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
-                    spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
-                    spaceCreateInfo.poseInReferenceSpace = Pose::Identity();
-                    CHECK_XRCMD(OpenXrApi::xrCreateReferenceSpace(session, &spaceCreateInfo, &m_viewSpace));
-#endif
+                        XrReferenceSpaceCreateInfo spaceCreateInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+                        spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+                        spaceCreateInfo.poseInReferenceSpace = Pose::Identity();
+                        CHECK_XRCMD(OpenXrApi::xrCreateReferenceSpace(session, &spaceCreateInfo, &m_viewSpace));
+                    }
                 }
             }
 
@@ -1195,34 +1189,33 @@ namespace openxr_api_layer {
                 return false;
             }
 
-#ifndef DEBUG_WITHOUT_TRACKER
-            XrEyeGazesInfoFB eyeGazeInfo{XR_TYPE_EYE_GAZES_INFO_FB};
-            eyeGazeInfo.baseSpace = m_viewSpace;
-            eyeGazeInfo.time = time;
+            if (!m_debugSimulateTracking) {
+                XrEyeGazesInfoFB eyeGazeInfo{XR_TYPE_EYE_GAZES_INFO_FB};
+                eyeGazeInfo.baseSpace = m_viewSpace;
+                eyeGazeInfo.time = time;
 
-            XrEyeGazesFB eyeGaze{XR_TYPE_EYE_GAZES_FB};
-            CHECK_XRCMD(OpenXrApi::xrGetEyeGazesFB(m_eyeTrackerFB, &eyeGazeInfo, &eyeGaze));
+                XrEyeGazesFB eyeGaze{XR_TYPE_EYE_GAZES_FB};
+                CHECK_XRCMD(OpenXrApi::xrGetEyeGazesFB(m_eyeTrackerFB, &eyeGazeInfo, &eyeGaze));
 
-            if (!(eyeGaze.gaze[0].isValid && eyeGaze.gaze[1].isValid)) {
-                return false;
-            }
+                if (!(eyeGaze.gaze[0].isValid && eyeGaze.gaze[1].isValid)) {
+                    return false;
+                }
 
-            if (!(eyeGaze.gaze[0].gazeConfidence > 0.5f && eyeGaze.gaze[1].gazeConfidence > 0.5f)) {
-                return false;
-            }
+                if (!(eyeGaze.gaze[0].gazeConfidence > 0.5f && eyeGaze.gaze[1].gazeConfidence > 0.5f)) {
+                    return false;
+                }
 
-            if (!getStateOnly) {
-                // Average the poses from both eyes.
-                const auto gaze = LoadXrPose(Pose::Slerp(eyeGaze.gaze[0].gazePose, eyeGaze.gaze[1].gazePose, 0.5f));
-                const auto gazeProjectedPoint =
-                    DirectX::XMVector3Transform(DirectX::XMVectorSet(0.f, 0.f, 1.f, 1.f), gaze);
+                if (!getStateOnly) {
+                    // Average the poses from both eyes.
+                    const auto gaze = LoadXrPose(Pose::Slerp(eyeGaze.gaze[0].gazePose, eyeGaze.gaze[1].gazePose, 0.5f));
+                    const auto gazeProjectedPoint =
+                        DirectX::XMVector3Transform(DirectX::XMVectorSet(0.f, 0.f, 1.f, 1.f), gaze);
 
-                unitVector.x = gazeProjectedPoint.m128_f32[0];
-                unitVector.y = -gazeProjectedPoint.m128_f32[1];
-                unitVector.z = gazeProjectedPoint.m128_f32[2];
-            }
-#else
-            {
+                    unitVector.x = gazeProjectedPoint.m128_f32[0];
+                    unitVector.y = -gazeProjectedPoint.m128_f32[1];
+                    unitVector.z = gazeProjectedPoint.m128_f32[2];
+                }
+            } else {
                 // Use the mouse to simulate eye tracking.
                 RECT rect;
                 rect.left = 1;
@@ -1237,7 +1230,6 @@ namespace openxr_api_layer {
                 XrVector2f point = {(float)cursor.x / 1000.f, (1000.f - cursor.y) / 1000.f};
                 unitVector = Normalize({point.x - 0.5f, 0.5f - point.y, -0.35f});
             }
-#endif
 
             TraceLoggingWrite(
                 g_traceProvider, "xrLocateViews_EyeGaze", TLArg(xr::ToString(unitVector).c_str(), "GazeUnitVector"));
@@ -1671,6 +1663,9 @@ namespace openxr_api_layer {
                     } else if (name == "turbo_mode") {
                         m_useTurboMode = std::stoi(value);
                         parsed = true;
+                    } else if (name == "debug_simulate_tracking") {
+                        m_debugSimulateTracking = std::stoi(value);
+                        parsed = true;
                     } else if (name == "debug_focus_view") {
                         m_debugFocusView = std::stoi(value);
                         parsed = true;
@@ -1746,6 +1741,7 @@ namespace openxr_api_layer {
         std::map<XrTime, std::pair<XrFovf, XrFovf>> m_focusFovForDisplayTime;
 
         bool m_debugFocusView{false};
+        bool m_debugSimulateTracking{false};
     };
 
     // This method is required by the framework to instantiate your OpenXrApi implementation.
