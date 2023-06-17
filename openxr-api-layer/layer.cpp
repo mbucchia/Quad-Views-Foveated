@@ -114,17 +114,22 @@ namespace openxr_api_layer {
             }
 
             // Bypass the extension unless the app might request quad views.
-            m_bypassApiLayer = true;
+            bool requestedQuadViews = false;
+            bool requestedD3D11 = false;
             for (uint32_t i = 0; i < createInfo->enabledExtensionCount; i++) {
                 const std::string_view ext(createInfo->enabledExtensionNames[i]);
                 TraceLoggingWrite(g_traceProvider, "xrCreateInstance", TLArg(ext.data(), "ExtensionName"));
                 if (ext == XR_VARJO_QUAD_VIEWS_EXTENSION_NAME) {
-                    m_bypassApiLayer = false;
+                    requestedQuadViews = true;
                 } else if (ext == XR_VARJO_FOVEATED_RENDERING_EXTENSION_NAME) {
                     m_requestedFoveatedRendering = true;
+                } else if (ext == XR_KHR_D3D11_ENABLE_EXTENSION_NAME) {
+                    requestedD3D11 = true;
                 }
             }
 
+            // We only support D3D11 at the moment.
+            m_bypassApiLayer = !(requestedQuadViews && requestedD3D11);
             if (m_bypassApiLayer) {
                 Log(fmt::format("{} layer will be bypassed\n", LayerName));
                 return XR_SUCCESS;
@@ -524,6 +529,16 @@ namespace openxr_api_layer {
                               TLArg((int)createInfo->systemId, "SystemId"),
                               TLArg(createInfo->createFlags, "CreateFlags"));
 
+            {
+                const XrBaseInStructure* entry = reinterpret_cast<const XrBaseInStructure*>(createInfo->next);
+                while (entry) {
+                    if (entry->type == XR_TYPE_GRAPHICS_BINDING_D3D11_KHR) {
+                        m_isSupportedGraphicsApi = true;
+                    }
+                    entry = entry->next;
+                }
+            }
+
             const XrResult result = OpenXrApi::xrCreateSession(instance, createInfo, session);
 
             if (XR_SUCCEEDED(result)) {
@@ -592,6 +607,14 @@ namespace openxr_api_layer {
             // We will implement quad views on top of stereo.
             XrSessionBeginInfo chainBeginInfo = *beginInfo;
             if (beginInfo->primaryViewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+                // The concept of enumerating view configuration types and graphics API are decoupled.
+                // We try to fail as gracefully as possible when we cannot support the configuration.
+                if (!m_isSupportedGraphicsApi) {
+                    ErrorLog("Session is using an unsupported graphics API\n");
+                    return XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED;
+                }
+
+                Log("Session is using quad views\n");
                 m_useQuadViews = true;
                 chainBeginInfo.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
             }
@@ -1102,7 +1125,7 @@ namespace openxr_api_layer {
                                     patchedView.subImage.imageRect.extent = m_fullFovResolution;
                                 }
 
-                                // TODO, P3: Handling depth submission (uncommon).
+                                // TODO: Handling of depth submission (uncommon).
                             }
                         }
 
@@ -1414,7 +1437,7 @@ namespace openxr_api_layer {
                                 Swapchain& swapchain,
                                 XrCompositionLayerFlags layerFlags,
                                 uint32_t referenceViewIndex) {
-            // TODO, P3: Support D3D12.
+            // TODO: Support D3D12.
 
             // Grab the input texture.
             ID3D11Texture2D* sourceImage;
@@ -1855,7 +1878,7 @@ namespace openxr_api_layer {
                     }
                     CHECK_XRCMD(result);
 
-                    // TODO, P3: Need some sort of timeout.
+                    // TODO: Need some sort of timeout.
                     if (result == XR_EVENT_UNAVAILABLE) {
                         std::this_thread::sleep_for(100ms);
                     }
@@ -1890,7 +1913,7 @@ namespace openxr_api_layer {
             CHECK_XRCMD(OpenXrApi::xrDestroySession(session));
 
             // Purge events for this session.
-            // TODO, P3: This might steal legitimate events from the runtime.
+            // TODO: This might steal legitimate events from the runtime.
             {
                 while (true) {
                     XrEventDataBuffer event{XR_TYPE_EVENT_DATA_BUFFER};
@@ -2122,6 +2145,8 @@ namespace openxr_api_layer {
         bool m_needFocusFovCorrectionQuirk{false};
         std::mutex m_focusFovMutex;
         std::map<XrTime, std::pair<XrFovf, XrFovf>> m_focusFovForDisplayTime;
+
+        bool m_isSupportedGraphicsApi{false};
 
         bool m_debugFocusView{false};
         bool m_debugSimulateTracking{false};
