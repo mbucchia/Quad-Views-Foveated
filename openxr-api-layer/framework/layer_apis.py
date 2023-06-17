@@ -7,6 +7,7 @@ override_functions = [
     "xrEnumerateViewConfigurationViews",
     "xrEnumerateEnvironmentBlendModes",
     "xrCreateReferenceSpace",
+    "xrDestroySpace",
     "xrCreateSession",
     "xrDestroySession",
     "xrBeginSession",

@@ -533,6 +533,7 @@ namespace openxr_api_layer {
                 m_applicationDevice.Reset();
                 m_renderContext.Reset();
 
+                m_gazeSpaces.clear();
                 m_swapchains.clear();
             }
 
@@ -1146,22 +1147,104 @@ namespace openxr_api_layer {
             return result;
         }
 
-#if 0
         // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrCreateReferenceSpace
         XrResult xrCreateReferenceSpace(XrSession session,
                                         const XrReferenceSpaceCreateInfo* createInfo,
                                         XrSpace* space) override {
-            // TODO, P2
+            if (createInfo->type != XR_TYPE_REFERENCE_SPACE_CREATE_INFO) {
+                return XR_ERROR_VALIDATION_FAILURE;
+            }
+
+            TraceLoggingWrite(g_traceProvider,
+                              "xrCreateReferenceSpace",
+                              TLXArg(session, "Session"),
+                              TLArg(xr::ToCString(createInfo->referenceSpaceType), "ReferenceSpaceType"),
+                              TLArg(xr::ToString(createInfo->poseInReferenceSpace).c_str(), "PoseInReferenceSpace"));
+
+            XrReferenceSpaceCreateInfo chainCreateInfo = *createInfo;
+
+            if (createInfo->referenceSpaceType == XR_REFERENCE_SPACE_TYPE_COMBINED_EYE_VARJO) {
+                // Create a dummy space, we will keep track of those handles below.
+                chainCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+            }
+
+            const XrResult result = OpenXrApi::xrCreateReferenceSpace(session, &chainCreateInfo, space);
+
+            if (XR_SUCCEEDED(result)) {
+                TraceLoggingWrite(g_traceProvider, "xrCreateReferenceSpace", TLXArg(*space, "Space"));
+
+                if (createInfo->referenceSpaceType == XR_REFERENCE_SPACE_TYPE_COMBINED_EYE_VARJO) {
+                    std::unique_lock lock(m_spacesMutex);
+
+                    m_gazeSpaces.insert(*space);
+                }
+            }
+
+            return result;
+        }
+
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrDestroySpace
+        XrResult xrDestroySpace(XrSpace space) override {
+            TraceLoggingWrite(g_traceProvider, "xrDestroySpace", TLXArg(space, "Space"));
+
+            const XrResult result = OpenXrApi::xrDestroySpace(space);
+
+            if (XR_SUCCEEDED(result)) {
+                std::unique_lock lock(m_spacesMutex);
+
+                m_gazeSpaces.erase(space);
+            }
+
+            return result;
         }
 
         // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrLocateSpace
         XrResult xrLocateSpace(XrSpace space, XrSpace baseSpace, XrTime time, XrSpaceLocation* location) override {
-            // TODO, P2
+            TraceLoggingWrite(g_traceProvider,
+                              "xrLocateSpace",
+                              TLXArg(space, "Space"),
+                              TLXArg(baseSpace, "BaseSpace"),
+                              TLArg(time, "Time"));
+
+            std::unique_lock lock(m_spacesMutex);
+
+            XrResult result = XR_ERROR_RUNTIME_FAILURE;
+            if (m_gazeSpaces.count(space)) {
+                if (location->type != XR_TYPE_SPACE_LOCATION) {
+                    return XR_ERROR_VALIDATION_FAILURE;
+                }
+
+                if (time <= 0) {
+                    return XR_ERROR_TIME_INVALID;
+                }
+
+                XrVector3f dummyVector{};
+                if (getEyeGaze(time, true, dummyVector)) {
+                    location->locationFlags = XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
+                } else {
+                    location->locationFlags = 0;
+                }
+                location->pose = Pose::Identity();
+
+                result = XR_SUCCESS;
+            } else {
+                result = OpenXrApi::xrLocateSpace(space, baseSpace, time, location);
+            }
+
+            if (XR_SUCCEEDED(result)) {
+                TraceLoggingWrite(g_traceProvider,
+                                  "xrLocateSpace",
+                                  TLArg(location->locationFlags, "LocationFlags"),
+                                  TLArg(xr::ToString(location->pose).c_str(), "Pose"));
+            }
+
+            return result;
         }
 
+#if 0
         // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrPollEvent
         XrResult xrPollEvent(XrInstance instance, XrEventDataBuffer* eventData) override {
-            // TODO, P2
+            // TODO, P2: Block/translate visibility mask events.
         }
 
         // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrGetVisibilityMaskKHR
@@ -1170,7 +1253,7 @@ namespace openxr_api_layer {
                                         uint32_t viewIndex,
                                         XrVisibilityMaskTypeKHR visibilityMaskType,
                                         XrVisibilityMaskKHR* visibilityMask) override {
-            // TODO, P2
+            // TODO, P2: Translate visibility mask requests.
         }
 #endif
 
@@ -1711,6 +1794,9 @@ namespace openxr_api_layer {
 
         std::mutex m_swapchainsMutex;
         std::unordered_map<XrSwapchain, Swapchain> m_swapchains;
+
+        std::mutex m_spacesMutex;
+        std::set<XrSpace> m_gazeSpaces;
 
         XrEyeTrackerFB m_eyeTrackerFB{XR_NULL_HANDLE};
         XrSpace m_viewSpace{XR_NULL_HANDLE};
