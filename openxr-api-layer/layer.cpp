@@ -154,6 +154,7 @@ namespace openxr_api_layer {
                               TLArg(m_verticalFovSection[0], "FixedVerticalSection"),
                               TLArg(m_horizontalFovSection[1], "FoveatedHorizontalSection"),
                               TLArg(m_verticalFovSection[1], "FoveatedVerticalSection"),
+                              TLArg(m_verticalFocusBias, "VerticalFocusBias"),
                               TLArg(m_preferFoveatedRendering, "PreferFoveatedRendering"),
                               TLArg(m_smoothenFocusViewEdges, "SmoothenEdges"),
                               TLArg(m_sharpenFocusView, "SharpenFocusView"),
@@ -188,6 +189,10 @@ namespace openxr_api_layer {
                                   TLArg(eyeTrackingProperties.supportsEyeTracking, "SupportsEyeTracking"));
 
                 m_isEyeTrackingAvailable = m_debugSimulateTracking || eyeTrackingProperties.supportsEyeTracking;
+
+                if (m_debugForceNoFoveated) {
+                    m_isEyeTrackingAvailable = false;
+                }
 
                 static bool wasSystemLogged = false;
                 if (!wasSystemLogged) {
@@ -721,7 +726,8 @@ namespace openxr_api_layer {
                                         const float MaxWidenAngle = 0.122173f; /* rad */
                                         constexpr float Deadzone = 0.15f;
                                         const XrVector2f centerOfFov{(projectedGaze.x + 1.f) / 2.f,
-                                                                     (1.f - projectedGaze.y) / 2.f};
+                                                                     (1.f - projectedGaze.y + m_verticalFocusBias) /
+                                                                         2.f};
                                         const XrVector2f v = centerOfFov - m_centerOfFov[stereoViewIndex];
                                         const float distanceFromCenter = std::sqrt(v.x * v.x + v.y * v.y);
                                         const float widenHalfAngle =
@@ -1343,7 +1349,8 @@ namespace openxr_api_layer {
                               TLArg(visibilityMask->indexCapacityInput, "IndexCapacityInput"));
 
             XrResult result = XR_ERROR_RUNTIME_FAILURE;
-            if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO && viewIndex >= xr::StereoView::Count) {
+            if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO &&
+                viewIndex >= xr::StereoView::Count) {
                 // No mask on the focus view.
                 if (viewIndex == xr::QuadView::FocusLeft || viewIndex == xr::QuadView::FocusRight) {
                     visibilityMask->vertexCountOutput = 0;
@@ -1781,7 +1788,7 @@ namespace openxr_api_layer {
                 // Calculate the "resting" gaze position.
                 ProjectPoint(view[eye], {0.f, 0.f, -1.f}, projectedGaze[eye]);
                 m_centerOfFov[eye].x = (projectedGaze[eye].x + 1.f) / 2.f;
-                m_centerOfFov[eye].y = (1.f - projectedGaze[eye].y) / 2.f;
+                m_centerOfFov[eye].y = (1.f - projectedGaze[eye].y + m_verticalFocusBias) / 2.f;
             }
 
             for (uint32_t foveated = 0; foveated <= 1; foveated++) {
@@ -1980,6 +1987,9 @@ namespace openxr_api_layer {
                     } else if (name == "vertical_focus_section") {
                         m_verticalFovSection[1] = std::stof(value);
                         parsed = true;
+                    } else if (name == "vertical_focus_bias") {
+                        m_verticalFocusBias = std::stof(value);
+                        parsed = true;
                     } else if (name == "prefer_foveated_rendering") {
                         m_preferFoveatedRendering = std::stoi(value);
                         parsed = true;
@@ -1997,6 +2007,9 @@ namespace openxr_api_layer {
                         parsed = true;
                     } else if (name == "debug_focus_view") {
                         m_debugFocusView = std::stoi(value);
+                        parsed = true;
+                    } else if (name == "debug_force_no_foveated") {
+                        m_debugForceNoFoveated = std::stoi(value);
                         parsed = true;
                     } else {
                         Log("L%u: Unrecognized option\n", lineNumber);
@@ -2025,6 +2038,7 @@ namespace openxr_api_layer {
         // [0] = non-foveated, [1] = foveated
         float m_horizontalFovSection[2]{0.75f, 0.5f};
         float m_verticalFovSection[2]{0.7f, 0.5f};
+        float m_verticalFocusBias{0.f};
         bool m_preferFoveatedRendering{true};
         float m_smoothenFocusViewEdges{0.03f};
         float m_sharpenFocusView{0.7f};
@@ -2079,6 +2093,7 @@ namespace openxr_api_layer {
 
         bool m_debugFocusView{false};
         bool m_debugSimulateTracking{false};
+        bool m_debugForceNoFoveated{false};
     };
 
     // This method is required by the framework to instantiate your OpenXrApi implementation.
