@@ -106,5 +106,8 @@
     <FxCompile Include="ProjectionPS.hlsl">
       <Filter>Shader Files</Filter>
     </FxCompile>
+    <FxCompile Include="SharpeningCS.hlsl">
+      <Filter>Shader Files</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>

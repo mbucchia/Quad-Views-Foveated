@@ -29,10 +29,15 @@
 #include <util.h>
 #include <utils/graphics.h>
 
+#define A_CPU
+#include <ffx_a.h>
+#include <ffx_cas.h>
+
 #include "views.h"
 
 #include <ProjectionVS.h>
 #include <ProjectionPS.h>
+#include <SharpeningCS.h>
 
 namespace openxr_api_layer {
 
@@ -52,9 +57,13 @@ namespace openxr_api_layer {
 
     struct ProjectionPSConstants {
         float smoothingArea;
-        bool smoothenEdges;
         bool isUnpremultipliedAlpha;
-        uint8_t padding[10];
+        uint8_t padding[11];
+    };
+
+    struct SharpeningCSConstants {
+        uint32_t Const0[4];
+        uint32_t Const1[4];
     };
 
     // This class implements our API layer.
@@ -146,8 +155,8 @@ namespace openxr_api_layer {
                               TLArg(m_horizontalFovSection[1], "FoveatedHorizontalSection"),
                               TLArg(m_verticalFovSection[1], "FoveatedVerticalSection"),
                               TLArg(m_preferFoveatedRendering, "PreferFoveatedRendering"),
-                              TLArg(m_smoothenEdges, "SmoothenEdges"),
-                              TLArg(m_smoothingArea, "SmoothingArea"),
+                              TLArg(m_smoothenFocusViewEdges, "SmoothenEdges"),
+                              TLArg(m_sharpenFocusView, "SharpenFocusView"),
                               TLArg(m_useTurboMode, "TurboMode"));
 
             return XR_SUCCESS;
@@ -525,7 +534,7 @@ namespace openxr_api_layer {
             return result;
         }
 
-        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrBeginSession
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrDestroySession
         XrResult xrDestroySession(XrSession session) override {
             TraceLoggingWrite(g_traceProvider, "xrDestroySession", TLXArg(session, "Session"));
 
@@ -550,6 +559,8 @@ namespace openxr_api_layer {
                 m_projectionPSConstants.Reset();
                 m_projectionVS.Reset();
                 m_projectionPS.Reset();
+                m_sharpeningCSConstants.Reset();
+                m_sharpeningCS.Reset();
 
                 m_applicationDevice.Reset();
                 m_renderContext.Reset();
@@ -594,6 +605,18 @@ namespace openxr_api_layer {
                         CHECK_XRCMD(OpenXrApi::xrCreateReferenceSpace(session, &spaceCreateInfo, &m_viewSpace));
                     }
                 }
+
+                if (m_smoothenFocusViewEdges) {
+                    Log(fmt::format("Edge smoothing: {:.2f}\n", m_smoothenFocusViewEdges));
+                } else {
+                    Log("Edge smoothing: Disabled\n");
+                }
+                if (m_sharpenFocusView) {
+                    Log(fmt::format("Sharpening: {:.2f}\n", m_sharpenFocusView));
+                } else {
+                    Log("Sharpening: Disabled\n");
+                }
+                Log(fmt::format("Turbo: {}\n", m_useTurboMode ? "Enabled" : "Disabled"));
             }
 
             return result;
@@ -1019,7 +1042,7 @@ namespace openxr_api_layer {
                                 TLArg(xr::ToString(proj->views[viewIndex].pose).c_str(), "Pose"),
                                 TLArg(xr::ToString(proj->views[viewIndex].fov).c_str(), "Fov"));
 
-                            if (!m_isFovMutable) {
+                            if (!m_isFovMutable || m_smoothenFocusViewEdges || m_sharpenFocusView) {
                                 // Do our own FOV composition when the platform does not support it.
                                 if (viewIndex >= xr::StereoView::Count) {
                                     const uint32_t referenceViewIndex = viewIndex % xr::StereoView::Count;
@@ -1057,8 +1080,9 @@ namespace openxr_api_layer {
                                         }
                                     }
 
-                                    // Relocate the view's content to a full FOV texture.
-                                    relocateViewContent(view, entry, proj->layerFlags, referenceViewIndex);
+                                    // Relocate the view's content to a full FOV texture and apply smoothening and/or
+                                    // sharpening.
+                                    processViewContent(view, entry, proj->layerFlags, referenceViewIndex);
 
                                     // Patch the view to reference the new swapchain at full FOV.
                                     XrCompositionLayerProjectionView& patchedView =
@@ -1288,6 +1312,7 @@ namespace openxr_api_layer {
             XrSwapchainCreateInfo createInfo{};
             XrSwapchain fullFovSwapchain[xr::StereoView::Count]{XR_NULL_HANDLE, XR_NULL_HANDLE};
             ComPtr<ID3D11Texture2D> flatImage[xr::StereoView::Count];
+            ComPtr<ID3D11Texture2D> sharpenedImage[xr::StereoView::Count];
         };
 
         bool getEyeGaze(XrTime time, bool getStateOnly, XrVector3f& unitVector) {
@@ -1343,10 +1368,10 @@ namespace openxr_api_layer {
             return true;
         }
 
-        void relocateViewContent(const XrCompositionLayerProjectionView& view,
-                                 Swapchain& swapchain,
-                                 XrCompositionLayerFlags layerFlags,
-                                 uint32_t referenceViewIndex) {
+        void processViewContent(const XrCompositionLayerProjectionView& view,
+                                Swapchain& swapchain,
+                                XrCompositionLayerFlags layerFlags,
+                                uint32_t referenceViewIndex) {
             // TODO, P3: Support D3D12.
 
             // Grab the input texture.
@@ -1399,6 +1424,7 @@ namespace openxr_api_layer {
             ComPtr<ID3DDeviceContextState> applicationContextState;
             m_renderContext->SwapDeviceContextState(m_layerContextState.Get(),
                                                     applicationContextState.ReleaseAndGetAddressOf());
+            m_renderContext->ClearState();
 
             // Copy to a flat texture for sampling.
             {
@@ -1435,15 +1461,96 @@ namespace openxr_api_layer {
                                                    view.subImage.imageArrayIndex,
                                                    &box);
 
+            // Sharpen if needed.
+            if (m_sharpenFocusView) {
+                {
+                    D3D11_TEXTURE2D_DESC desc{};
+                    if (swapchain.sharpenedImage[referenceViewIndex]) {
+                        swapchain.sharpenedImage[referenceViewIndex]->GetDesc(&desc);
+                    }
+                    if (!swapchain.sharpenedImage[referenceViewIndex] ||
+                        desc.Width != view.subImage.imageRect.extent.width ||
+                        desc.Height != view.subImage.imageRect.extent.height) {
+                        desc = {};
+                        desc.ArraySize = 1;
+                        desc.Width = view.subImage.imageRect.extent.width;
+                        desc.Height = view.subImage.imageRect.extent.height;
+                        desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+                        desc.MipLevels = 1;
+                        desc.SampleDesc.Count = 1;
+                        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+                        CHECK_HRCMD(m_applicationDevice->CreateTexture2D(
+                            &desc, nullptr, swapchain.sharpenedImage[referenceViewIndex].ReleaseAndGetAddressOf()));
+                    }
+                }
+
+                // Create ephemeral SRV/UAV.
+                ComPtr<ID3D11ShaderResourceView> srv;
+                {
+                    D3D11_SHADER_RESOURCE_VIEW_DESC desc{};
+                    desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+                    desc.Format = (DXGI_FORMAT)swapchain.createInfo.format;
+                    desc.Texture2D.MipLevels = 1;
+                    CHECK_HRCMD(m_applicationDevice->CreateShaderResourceView(
+                        swapchain.flatImage[referenceViewIndex].Get(), &desc, srv.ReleaseAndGetAddressOf()));
+                }
+                ComPtr<ID3D11UnorderedAccessView> uav;
+                {
+                    D3D11_UNORDERED_ACCESS_VIEW_DESC desc{};
+                    desc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+                    desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+                    CHECK_HRCMD(m_applicationDevice->CreateUnorderedAccessView(
+                        swapchain.sharpenedImage[referenceViewIndex].Get(), &desc, uav.ReleaseAndGetAddressOf()));
+                }
+
+                // Set up the shader.
+                SharpeningCSConstants sharpening{};
+                CasSetup(sharpening.Const0,
+                         sharpening.Const1,
+                         std::clamp(m_sharpenFocusView, 0.f, 1.f),
+                         (AF1)view.subImage.imageRect.extent.width,
+                         (AF1)view.subImage.imageRect.extent.height,
+                         (AF1)view.subImage.imageRect.extent.width,
+                         (AF1)view.subImage.imageRect.extent.height);
+                {
+                    D3D11_MAPPED_SUBRESOURCE mappedResources;
+                    CHECK_HRCMD(m_renderContext->Map(
+                        m_sharpeningCSConstants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResources));
+                    memcpy(mappedResources.pData, &sharpening, sizeof(sharpening));
+                    m_renderContext->Unmap(m_sharpeningCSConstants.Get(), 0);
+                }
+
+                m_renderContext->CSSetConstantBuffers(0, 1, m_sharpeningCSConstants.GetAddressOf());
+                m_renderContext->CSSetShaderResources(0, 1, srv.GetAddressOf());
+                m_renderContext->CSSetUnorderedAccessViews(0, 1, uav.GetAddressOf(), nullptr);
+                m_renderContext->CSSetShader(m_sharpeningCS.Get(), nullptr, 0);
+
+                // This value is the image region dim that each thread group of the CAS shader operates on
+                static const int threadGroupWorkRegionDim = 16;
+                int dispatchX =
+                    (view.subImage.imageRect.extent.width + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+                int dispatchY =
+                    (view.subImage.imageRect.extent.height + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+                m_renderContext->Dispatch((UINT)dispatchX, (UINT)dispatchY, 1);
+
+                // Unbind the resources used below to avoid D3D validation errors.
+                ID3D11UnorderedAccessView* nullUAV[] = {nullptr};
+                m_renderContext->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
+            }
+
             // Create ephemeral SRV/RTV.
             ComPtr<ID3D11ShaderResourceView> srv;
             {
                 D3D11_SHADER_RESOURCE_VIEW_DESC desc{};
                 desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-                desc.Format = (DXGI_FORMAT)swapchain.createInfo.format;
+                desc.Format =
+                    m_sharpenFocusView ? DXGI_FORMAT_R16G16B16A16_FLOAT : (DXGI_FORMAT)swapchain.createInfo.format;
                 desc.Texture2D.MipLevels = 1;
                 CHECK_HRCMD(m_applicationDevice->CreateShaderResourceView(
-                    swapchain.flatImage[referenceViewIndex].Get(), &desc, srv.ReleaseAndGetAddressOf()));
+                    m_sharpenFocusView ? swapchain.sharpenedImage[referenceViewIndex].Get()
+                                       : swapchain.flatImage[referenceViewIndex].Get(),
+                    &desc,
+                    srv.ReleaseAndGetAddressOf()));
             }
 
             ComPtr<ID3D11RenderTargetView> rtv;
@@ -1480,8 +1587,7 @@ namespace openxr_api_layer {
             }
 
             ProjectionPSConstants drawing{};
-            drawing.smoothingArea = m_smoothingArea;
-            drawing.smoothenEdges = m_smoothenEdges;
+            drawing.smoothingArea = m_smoothenFocusViewEdges;
             drawing.isUnpremultipliedAlpha = layerFlags & XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
             {
                 D3D11_MAPPED_SUBRESOURCE mappedResources;
@@ -1492,7 +1598,6 @@ namespace openxr_api_layer {
             }
 
             // Dispatch the composition shader.
-            m_renderContext->ClearState();
             m_renderContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
             m_renderContext->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
             m_renderContext->RSSetState(m_noDepthRasterizer.Get());
@@ -1537,6 +1642,8 @@ namespace openxr_api_layer {
                                                                   nullptr,
                                                                   m_layerContextState.ReleaseAndGetAddressOf()));
             }
+
+            // For FOV projection.
             {
                 ComPtr<ID3D11DeviceContext> context;
                 device->GetImmediateContext(context.ReleaseAndGetAddressOf());
@@ -1582,6 +1689,18 @@ namespace openxr_api_layer {
                 g_ProjectionVS, sizeof(g_ProjectionVS), nullptr, m_projectionVS.ReleaseAndGetAddressOf()));
             CHECK_HRCMD(device->CreatePixelShader(
                 g_ProjectionPS, sizeof(g_ProjectionPS), nullptr, m_projectionPS.ReleaseAndGetAddressOf()));
+
+            // For CAS sharpening.
+            {
+                D3D11_BUFFER_DESC desc{};
+                desc.ByteWidth = (UINT)std::max(16ull, sizeof(SharpeningCSConstants));
+                desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+                desc.Usage = D3D11_USAGE_DYNAMIC;
+                desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+                CHECK_HRCMD(device->CreateBuffer(&desc, nullptr, m_sharpeningCSConstants.ReleaseAndGetAddressOf()));
+            }
+            CHECK_HRCMD(device->CreateComputeShader(
+                g_SharpeningCS, sizeof(g_SharpeningCS), nullptr, m_sharpeningCS.ReleaseAndGetAddressOf()));
         }
 
         void populateFovTables(XrSystemId systemId) {
@@ -1802,11 +1921,11 @@ namespace openxr_api_layer {
                     } else if (name == "prefer_foveated_rendering") {
                         m_preferFoveatedRendering = std::stoi(value);
                         parsed = true;
-                    } else if (name == "smoothen_edges") {
-                        m_smoothenEdges = std::stoi(value);
+                    } else if (name == "smoothen_focus_view_edges") {
+                        m_smoothenFocusViewEdges = std::stof(value);
                         parsed = true;
-                    } else if (name == "smoothing_area") {
-                        m_smoothingArea = std::stof(value);
+                    } else if (name == "sharpen_focus_view") {
+                        m_sharpenFocusView = std::stof(value);
                         parsed = true;
                     } else if (name == "turbo_mode") {
                         m_useTurboMode = std::stoi(value);
@@ -1845,8 +1964,8 @@ namespace openxr_api_layer {
         float m_horizontalFovSection[2]{0.75f, 0.5f};
         float m_verticalFovSection[2]{0.7f, 0.5f};
         bool m_preferFoveatedRendering{true};
-        bool m_smoothenEdges{true};
-        float m_smoothingArea{0.03f};
+        float m_smoothenFocusViewEdges{0.03f};
+        float m_sharpenFocusView{0.7f};
         bool m_useTurboMode{false};
 
         bool m_needComputeBaseFov{true};
@@ -1877,6 +1996,8 @@ namespace openxr_api_layer {
         ComPtr<ID3D11Buffer> m_projectionPSConstants;
         ComPtr<ID3D11VertexShader> m_projectionVS;
         ComPtr<ID3D11PixelShader> m_projectionPS;
+        ComPtr<ID3D11Buffer> m_sharpeningCSConstants;
+        ComPtr<ID3D11ComputeShader> m_sharpeningCS;
 
         // Turbo mode.
         std::chrono::time_point<std::chrono::steady_clock> m_lastFrameWaitTimestamp{};

@@ -24,7 +24,6 @@
 
 cbuffer ConstantBuffer : register(b0) {
     float smoothingArea;
-    bool smoothenEdges;
     bool isUnpremultipliedAlpha;
 };
 
@@ -60,7 +59,7 @@ float4 main(in float4 position : SV_POSITION, in float3 projectedCoord : PROJ_CO
     }
 
     // Do a smooth transition with alpha-blending around the edges.
-    if (smoothenEdges) {
+    if (smoothingArea) {
         float2 s = smoothstep(float2(0, 0), float2(smoothingArea, smoothingArea), layerTexCoord) -
                    smoothstep(float2(1, 1) - float2(smoothingArea, smoothingArea), float2(1, 1), layerTexCoord);
         color.a = max(0.5, s.x * s.y);
