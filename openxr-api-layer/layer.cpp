@@ -1713,7 +1713,7 @@ namespace openxr_api_layer {
             }
             {
                 D3D11_BUFFER_DESC desc{};
-                desc.ByteWidth = (UINT)std::max(16ull, sizeof(ProjectionVSConstants));
+                desc.ByteWidth = (UINT)std::max((size_t)16, sizeof(ProjectionVSConstants));
                 desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
                 desc.Usage = D3D11_USAGE_DYNAMIC;
                 desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
@@ -1721,7 +1721,7 @@ namespace openxr_api_layer {
             }
             {
                 D3D11_BUFFER_DESC desc{};
-                desc.ByteWidth = (UINT)std::max(16ull, sizeof(ProjectionPSConstants));
+                desc.ByteWidth = (UINT)std::max((size_t)16, sizeof(ProjectionPSConstants));
                 desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
                 desc.Usage = D3D11_USAGE_DYNAMIC;
                 desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
@@ -1735,7 +1735,7 @@ namespace openxr_api_layer {
             // For CAS sharpening.
             {
                 D3D11_BUFFER_DESC desc{};
-                desc.ByteWidth = (UINT)std::max(16ull, sizeof(SharpeningCSConstants));
+                desc.ByteWidth = (UINT)std::max((size_t)16, sizeof(SharpeningCSConstants));
                 desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
                 desc.Usage = D3D11_USAGE_DYNAMIC;
                 desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
