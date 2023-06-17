@@ -23,6 +23,13 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Scripts", "Scripts", "{BA77
 		scripts\Uninstall-Layer32.ps1 = scripts\Uninstall-Layer32.ps1
 	EndProjectSection
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "GitHub", "GitHub", "{AE910B95-8E3F-42D4-B121-8C477A679441}"
+	ProjectSection(SolutionItems) = preProject
+		.github\workflows\msbuild.yml = .github\workflows\msbuild.yml
+	EndProjectSection
+EndProject
+Project("{54435603-DBB4-11D2-8724-00A0C9A8B90C}") = "installer", "installer\installer.vdproj", "{8CD923BD-6B3B-4409-8290-FDAC00DCB59D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -39,12 +46,18 @@ Global
 		{93D573D0-634F-4BA0-8FE0-FB63D7D00A05}.Release|Win32.Build.0 = Release|Win32
 		{93D573D0-634F-4BA0-8FE0-FB63D7D00A05}.Release|x64.ActiveCfg = Release|x64
 		{93D573D0-634F-4BA0-8FE0-FB63D7D00A05}.Release|x64.Build.0 = Release|x64
+		{8CD923BD-6B3B-4409-8290-FDAC00DCB59D}.Debug|Win32.ActiveCfg = Debug
+		{8CD923BD-6B3B-4409-8290-FDAC00DCB59D}.Debug|x64.ActiveCfg = Debug
+		{8CD923BD-6B3B-4409-8290-FDAC00DCB59D}.Release|Win32.ActiveCfg = Release
+		{8CD923BD-6B3B-4409-8290-FDAC00DCB59D}.Release|x64.ActiveCfg = Release
+		{8CD923BD-6B3B-4409-8290-FDAC00DCB59D}.Release|x64.Build.0 = Release
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{BA775DE9-671E-4E3B-92AC-9828C2AAF490} = {A53ED6CB-95D3-4833-8A16-C6A588F16F6E}
+		{AE910B95-8E3F-42D4-B121-8C477A679441} = {A53ED6CB-95D3-4833-8A16-C6A588F16F6E}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {07E77829-9766-4585-AC6C-0A28BA014E77}
