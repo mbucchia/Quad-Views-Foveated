@@ -994,6 +994,35 @@ namespace openxr_api_layer {
                               TLArg(frameEndInfo->displayTime, "DisplayTime"),
                               TLArg(xr::ToCString(frameEndInfo->environmentBlendMode), "EnvironmentBlendMode"));
 
+#ifdef _DEBUG
+            {
+#define DEBUG_ACTION(key, action)                                                                                      \
+    static bool wasCtrl##key##Pressed = false;                                                                         \
+    const bool isCtrl##key##Pressed = GetAsyncKeyState(VK_CONTROL) < 0 && GetAsyncKeyState(key) < 0;                   \
+    if (!wasCtrl##key##Pressed && isCtrl##key##Pressed) {                                                              \
+        action;                                                                                                        \
+    }                                                                                                                  \
+    wasCtrl##key##Pressed = isCtrl##key##Pressed;
+
+                DEBUG_ACTION(VK_F1, {
+                    if (m_smoothenFocusViewEdges) {
+                        m_smoothenFocusViewEdges = 0;
+                    } else {
+                        m_smoothenFocusViewEdges = 0.5f;
+                    }
+                });
+                DEBUG_ACTION(VK_F2, {
+                    if (m_sharpenFocusView) {
+                        m_sharpenFocusView = 0;
+                    } else {
+                        m_sharpenFocusView = 0.7f;
+                    }
+                });
+                DEBUG_ACTION(VK_F3, { m_sharpenFocusView = std::clamp(m_sharpenFocusView - 0.1f, 0.f, 1.f); });
+                DEBUG_ACTION(VK_F4, { m_sharpenFocusView = std::clamp(m_sharpenFocusView + 0.1f, 0.f, 1.f); });
+            }
+#endif
+
             // We will allocate structures to pass to the real xrEndFrame().
             std::vector<XrCompositionLayerProjection> projectionAllocator;
             std::vector<std::array<XrCompositionLayerProjectionView, xr::StereoView::Count>> projectionViewAllocator;
