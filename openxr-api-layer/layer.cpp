@@ -126,6 +126,9 @@ namespace openxr_api_layer {
             TraceLoggingWrite(g_traceProvider, "xrCreateInstance", TLArg(runtimeName.c_str(), "RuntimeName"));
             Log(fmt::format("Using OpenXR runtime: {}\n", runtimeName));
 
+            // Parse the configuration.
+            LoadConfiguration();
+
             // Game-specific quirks.
             m_needFocusFovCorrectionQuirk = GetApplicationName() == "DCS World";
 
@@ -1443,6 +1446,80 @@ namespace openxr_api_layer {
             }
         }
 
+        void LoadConfiguration() {
+            std::ifstream configFile;
+
+            // Look in %LocalAppData% first, then fallback to your installation folder.
+            auto configPath = localAppData / "settings.cfg";
+            Log(fmt::format("Trying to locate configuration file at '{}'...\n", configPath.string()));
+            configFile.open(configPath);
+            if (!configFile.is_open()) {
+                Log("Not found\n");
+                configPath = dllHome / "settings.cfg";
+                Log(fmt::format("Trying to locate configuration file at '{}'...\n", configPath.string()));
+                configFile.open(configPath);
+            }
+
+            if (configFile.is_open()) {
+                unsigned int lineNumber = 0;
+                std::string line;
+                while (std::getline(configFile, line)) {
+                    lineNumber++;
+                    ParseConfigurationStatement(line, lineNumber);
+                }
+                configFile.close();
+            } else {
+                Log("No configuration was found\n");
+            }
+        }
+
+        void ParseConfigurationStatement(const std::string& line, unsigned int lineNumber) {
+            try {
+                const auto offset = line.find('=');
+                if (offset != std::string::npos) {
+                    const std::string name = line.substr(0, offset);
+                    const std::string value = line.substr(offset + 1);
+
+                    bool parsed = false;
+                    if (name == "peripheral_multiplier") {
+                        m_peripheralPixelDensity = std::stof(value);
+                        parsed = true;
+                    } else if (name == "focus_multiplier") {
+                        m_focusPixelDensity = std::stof(value);
+                        parsed = true;
+                    } else if (name == "horizontal_fixed_section") {
+                        m_horizontalFovSection[0] = std::stof(value);
+                        parsed = true;
+                    } else if (name == "vertical_fixed_section") {
+                        m_verticalFovSection[0] = std::stof(value);
+                        parsed = true;
+                    } else if (name == "horizontal_focus_section") {
+                        m_horizontalFovSection[1] = std::stof(value);
+                        parsed = true;
+                    } else if (name == "vertical_focus_section") {
+                        m_verticalFovSection[1] = std::stof(value);
+                        parsed = true;
+                    } else if (name == "prefer_foveated_rendering") {
+                        m_preferFoveatedRendering = std::stoi(value);
+                        parsed = true;
+                    } else if (name == "debug_focus_view") {
+                        m_debugFocusView = std::stoi(value);
+                        parsed = true;
+                    } else {
+                        Log("L%u: Unrecognized option\n", lineNumber);
+                    }
+
+                    if (parsed) {
+                        Log(fmt::format("  Found option '{}={}'\n", name, value));
+                    }
+                } else {
+                    Log("L%u: Improperly formatted option\n", lineNumber);
+                }
+            } catch (...) {
+                Log("L%u: Parsing error\n", lineNumber);
+            }
+        }
+
         bool m_bypassApiLayer{false};
         bool m_useQuadViews{false};
         bool m_requestedFoveatedRendering{false};
@@ -1450,7 +1527,6 @@ namespace openxr_api_layer {
         bool m_isFovMutable{false};
         bool m_isEyeTrackingAvailable{false};
 
-        // TODO, P2: Make this tunable.
         float m_peripheralPixelDensity{0.5f};
         float m_focusPixelDensity{1.f};
         // [0] = non-foveated, [1] = foveated

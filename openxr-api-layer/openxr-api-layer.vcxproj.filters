@@ -97,6 +97,7 @@
     <None Include="openxr-api-layer-32.json" />
     <None Include="packages.config" />
     <None Include="module.def" />
+    <None Include="..\settings.cfg" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="ProjectionVS.hlsl">

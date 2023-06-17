@@ -312,6 +312,7 @@ copy $(SolutionDir)\scripts\Uninstall-Layer32.ps1 $(OutDir)
     <ClCompile Include="utils\input.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\settings.cfg" />
     <None Include="framework\dispatch_generator.py" />
     <None Include="framework\layer_apis.py" />
     <None Include="module.def" />
