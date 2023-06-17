@@ -1000,34 +1000,7 @@ namespace openxr_api_layer {
                               TLArg(frameEndInfo->displayTime, "DisplayTime"),
                               TLArg(xr::ToCString(frameEndInfo->environmentBlendMode), "EnvironmentBlendMode"));
 
-#ifdef _DEBUG
-            {
-#define DEBUG_ACTION(key, action)                                                                                      \
-    static bool wasCtrl##key##Pressed = false;                                                                         \
-    const bool isCtrl##key##Pressed = GetAsyncKeyState(VK_CONTROL) < 0 && GetAsyncKeyState(key) < 0;                   \
-    if (!wasCtrl##key##Pressed && isCtrl##key##Pressed) {                                                              \
-        action;                                                                                                        \
-    }                                                                                                                  \
-    wasCtrl##key##Pressed = isCtrl##key##Pressed;
-
-                DEBUG_ACTION(VK_F1, {
-                    if (m_smoothenFocusViewEdges) {
-                        m_smoothenFocusViewEdges = 0;
-                    } else {
-                        m_smoothenFocusViewEdges = 0.5f;
-                    }
-                });
-                DEBUG_ACTION(VK_F2, {
-                    if (m_sharpenFocusView) {
-                        m_sharpenFocusView = 0;
-                    } else {
-                        m_sharpenFocusView = 0.7f;
-                    }
-                });
-                DEBUG_ACTION(VK_F3, { m_sharpenFocusView = std::clamp(m_sharpenFocusView - 0.1f, 0.f, 1.f); });
-                DEBUG_ACTION(VK_F4, { m_sharpenFocusView = std::clamp(m_sharpenFocusView + 0.1f, 0.f, 1.f); });
-            }
-#endif
+            handleDebugKeys();
 
             // We will allocate structures to pass to the real xrEndFrame().
             std::vector<XrCompositionLayerProjection> projectionAllocator;
@@ -1934,6 +1907,62 @@ namespace openxr_api_layer {
             }
         }
 
+        void handleDebugKeys() {
+            if (m_debugKeys) {
+                bool log = false;
+
+#define DEBUG_ACTION(label, key, action)                                                                               \
+    static bool wasCtrl##label##Pressed = false;                                                                       \
+    const bool isCtrl##label##Pressed = GetAsyncKeyState(VK_CONTROL) < 0 && GetAsyncKeyState(key) < 0;                 \
+    if (!wasCtrl##label##Pressed && isCtrl##label##Pressed) {                                                          \
+        log = true;                                                                                                    \
+        action;                                                                                                        \
+    }                                                                                                                  \
+    wasCtrl##label##Pressed = isCtrl##label##Pressed;
+
+                DEBUG_ACTION(
+                    SharpenLess, 'J', { m_sharpenFocusView = std::clamp(m_sharpenFocusView - 0.1f, 0.f, 1.f); });
+                DEBUG_ACTION(
+                    SharpenMore, 'U', { m_sharpenFocusView = std::clamp(m_sharpenFocusView + 0.1f, 0.f, 1.f); });
+                DEBUG_ACTION(ToggleSharpen, 'N', {
+                    static float lastSharpenFocusView = m_sharpenFocusView;
+                    if (m_sharpenFocusView) {
+                        lastSharpenFocusView = m_sharpenFocusView;
+                        m_sharpenFocusView = 0;
+                    } else {
+                        m_sharpenFocusView = lastSharpenFocusView;
+                    }
+                });
+                DEBUG_ACTION(SmoothenThicknessLess, 'I', {
+                    m_smoothenFocusViewEdges = std::clamp(m_smoothenFocusViewEdges - 0.01f, 0.f, 1.f);
+                });
+                DEBUG_ACTION(SmoothenThicknessMore, 'K', {
+                    m_smoothenFocusViewEdges = std::clamp(m_smoothenFocusViewEdges + 0.01f, 0.f, 1.f);
+                });
+                DEBUG_ACTION(ToggleSmoothen, 'M', {
+                    static float lastSmoothenFocusViewEdges = m_smoothenFocusViewEdges;
+                    if (m_smoothenFocusViewEdges) {
+                        lastSmoothenFocusViewEdges = m_smoothenFocusViewEdges;
+                        m_smoothenFocusViewEdges = 0;
+                    } else {
+                        m_smoothenFocusViewEdges = lastSmoothenFocusViewEdges;
+                    }
+                });
+                DEBUG_ACTION(VerticalFocusBiasUp, 'O', {
+                    m_verticalFocusBias = std::clamp(m_verticalFocusBias + 0.01f, -1.f, 1.f);
+                });
+                DEBUG_ACTION(VerticalFocusBiasDown, 'L', {
+                    m_verticalFocusBias = std::clamp(m_verticalFocusBias - 0.01f, -1.f, 1.f);
+                });
+
+                if (log) {
+                    Log(fmt::format("sharpen_focus_view={:.1f}\n", m_sharpenFocusView));
+                    Log(fmt::format("smoothen_focus_view_edges={:.2f}\n", m_smoothenFocusViewEdges));
+                    Log(fmt::format("vertical_focus_bias={:.2f}\n", m_verticalFocusBias));
+                }
+            }
+        }
+
         void LoadConfiguration() {
             std::ifstream configFile;
 
@@ -2010,6 +2039,9 @@ namespace openxr_api_layer {
                         parsed = true;
                     } else if (name == "debug_force_no_foveated") {
                         m_debugForceNoFoveated = std::stoi(value);
+                        parsed = true;
+                    } else if (name == "debug_keys") {
+                        m_debugKeys = std::stoi(value);
                         parsed = true;
                     } else {
                         Log("L%u: Unrecognized option\n", lineNumber);
@@ -2094,6 +2126,7 @@ namespace openxr_api_layer {
         bool m_debugFocusView{false};
         bool m_debugSimulateTracking{false};
         bool m_debugForceNoFoveated{false};
+        bool m_debugKeys{false};
     };
 
     // This method is required by the framework to instantiate your OpenXrApi implementation.
