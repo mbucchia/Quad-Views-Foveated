@@ -15,6 +15,12 @@
     {
         "Entry"
         {
+        "MsmKey" = "8:_0525ADE7BC2A4503BCF705B795EBC9BC"
+        "OwnerKey" = "8:_UNDEFINED"
+        "MsmSig" = "8:_UNDEFINED"
+        }
+        "Entry"
+        {
         "MsmKey" = "8:_1192E3ADD79143AAB0379D66CBF8F580"
         "OwnerKey" = "8:_UNDEFINED"
         "MsmSig" = "8:_UNDEFINED"
@@ -33,7 +39,7 @@
         }
         "Entry"
         {
-        "MsmKey" = "8:_754E40D34E224500833780BEA90782D3"
+        "MsmKey" = "8:_6E01812B7B3443F8974CA8EA0C86F92A"
         "OwnerKey" = "8:_UNDEFINED"
         "MsmSig" = "8:_UNDEFINED"
         }
@@ -136,6 +142,26 @@
         }
         "File"
         {
+            "{1FB2D0AE-D3B9-43D4-B9DD-F88EC61E35DE}:_0525ADE7BC2A4503BCF705B795EBC9BC"
+            {
+            "SourcePath" = "8:..\\bin\\x64\\Release\\XR_APILAYER_MBUCCHIA_meta_foveated.dll"
+            "TargetName" = "8:XR_APILAYER_MBUCCHIA_meta_foveated.dll"
+            "Tag" = "8:"
+            "Folder" = "8:_505DF0FD526F4594B101F5A5B0F2DC83"
+            "Condition" = "8:"
+            "Transitive" = "11:FALSE"
+            "Vital" = "11:TRUE"
+            "ReadOnly" = "11:FALSE"
+            "Hidden" = "11:FALSE"
+            "System" = "11:FALSE"
+            "Permanent" = "11:FALSE"
+            "SharedLegacy" = "11:FALSE"
+            "PackageAs" = "3:1"
+            "Register" = "3:1"
+            "Exclude" = "11:FALSE"
+            "IsDependency" = "11:FALSE"
+            "IsolateTo" = "8:"
+            }
             "{1FB2D0AE-D3B9-43D4-B9DD-F88EC61E35DE}:_1192E3ADD79143AAB0379D66CBF8F580"
             {
             "SourcePath" = "8:..\\LICENSE"
@@ -180,6 +206,26 @@
             {
             "SourcePath" = "8:README.rtf"
             "TargetName" = "8:README.rtf"
+            "Tag" = "8:"
+            "Folder" = "8:_505DF0FD526F4594B101F5A5B0F2DC83"
+            "Condition" = "8:"
+            "Transitive" = "11:FALSE"
+            "Vital" = "11:TRUE"
+            "ReadOnly" = "11:FALSE"
+            "Hidden" = "11:FALSE"
+            "System" = "11:FALSE"
+            "Permanent" = "11:FALSE"
+            "SharedLegacy" = "11:FALSE"
+            "PackageAs" = "3:1"
+            "Register" = "3:1"
+            "Exclude" = "11:FALSE"
+            "IsDependency" = "11:FALSE"
+            "IsolateTo" = "8:"
+            }
+            "{1FB2D0AE-D3B9-43D4-B9DD-F88EC61E35DE}:_6E01812B7B3443F8974CA8EA0C86F92A"
+            {
+            "SourcePath" = "8:..\\bin\\x64\\Release\\openxr-api-layer.json"
+            "TargetName" = "8:openxr-api-layer.json"
             "Tag" = "8:"
             "Folder" = "8:_505DF0FD526F4594B101F5A5B0F2DC83"
             "Condition" = "8:"
@@ -293,7 +339,7 @@
         "Name" = "8:Microsoft Visual Studio"
         "ProductName" = "8:OpenXR-Meta-Foveated"
         "ProductCode" = "8:{5D4C5A26-D211-4FAA-83F7-A77B8E060F9F}"
-        "PackageCode" = "8:{FB3436B0-C1F7-48C0-9ABE-B0828E5445E3}"
+        "PackageCode" = "8:{4B2147DF-B7AD-4218-A316-4244A8609443}"
         "UpgradeCode" = "8:{1685CBAF-3515-4983-8944-D9D95A631F4C}"
         "AspNetVersion" = "8:2.0.50727.0"
         "RestartWWWService" = "11:FALSE"
@@ -384,7 +430,7 @@
                                                                 {
                                                                     "{ADCFDA98-8FDD-45E4-90BC-E3D20B029870}:_612861F2F6D44E8BB93B2F80ED3260E1"
                                                                     {
-                                                                    "Name" = "8:[TARGETDIR]XR_APILAYER_MBUCCHIA_meta_foveated.json"
+                                                                    "Name" = "8:[TARGETDIR]openxr-api-layer.json"
                                                                     "Condition" = "8:"
                                                                     "Transitive" = "11:FALSE"
                                                                     "ValueTypes" = "3:3"
@@ -979,34 +1025,6 @@
         }
         "ProjectOutput"
         {
-            "{5259A561-127C-4D43-A0A1-72F10C7B3BF8}:_754E40D34E224500833780BEA90782D3"
-            {
-            "SourcePath" = "8:..\\bin\\x64\\Release\\XR_APILAYER_MBUCCHIA_meta_foveated.dll"
-            "TargetName" = "8:"
-            "Tag" = "8:"
-            "Folder" = "8:_505DF0FD526F4594B101F5A5B0F2DC83"
-            "Condition" = "8:"
-            "Transitive" = "11:FALSE"
-            "Vital" = "11:TRUE"
-            "ReadOnly" = "11:FALSE"
-            "Hidden" = "11:FALSE"
-            "System" = "11:FALSE"
-            "Permanent" = "11:FALSE"
-            "SharedLegacy" = "11:FALSE"
-            "PackageAs" = "3:1"
-            "Register" = "3:1"
-            "Exclude" = "11:FALSE"
-            "IsDependency" = "11:FALSE"
-            "IsolateTo" = "8:"
-            "ProjectOutputGroupRegister" = "3:1"
-            "OutputConfiguration" = "8:"
-            "OutputGroupCanonicalName" = "8:Built"
-            "OutputProjectGuid" = "8:{93D573D0-634F-4BA0-8FE0-FB63D7D00A05}"
-            "ShowKeyOutput" = "11:TRUE"
-                "ExcludeFilters"
-                {
-                }
-            }
             "{5259A561-127C-4D43-A0A1-72F10C7B3BF8}:_D46AA62A6061483F81DEEEA11F02467E"
             {
             "SourcePath" = "8:"
