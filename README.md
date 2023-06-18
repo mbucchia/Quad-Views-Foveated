@@ -8,7 +8,7 @@ If you are using a Varjo headset, do not use this software, but instead use [Var
 
 In technical terms:
 
-This software enables OpenXR apps developed with [XR_VARJO_quad_views](https://registry.khronos.org/OpenXR/specs/1.0/html/xrspec.html#XR_VARJO_quad_views) and optionally [XR_VARJO_foveated_rendering](https://registry.khronos.org/OpenXR/specs/1.0/html/xrspec.html#XR_VARJO_foveated_rendering) to be used on Meta Quest Pro. It translates each quad view projection layer into two separate stereo projection layers, and uses the eye tracking support on the device to make the inner projection views follow the eye gaze.
+This software enables OpenXR apps developed with [`XR_VARJO_quad_views`](https://registry.khronos.org/OpenXR/specs/1.0/html/xrspec.html#XR_VARJO_quad_views) and optionally [`XR_VARJO_foveated_rendering`](https://registry.khronos.org/OpenXR/specs/1.0/html/xrspec.html#XR_VARJO_foveated_rendering) to be used on Meta Quest Pro. It translates each quad view projection layer into two separate stereo projection layers, and uses the eye tracking support on the device to make the inner projection views follow the eye gaze.
 
 DISCLAIMER: This software is distributed as-is, without any warranties or conditions of any kind. Use at your own risks.
 
