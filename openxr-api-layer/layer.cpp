@@ -2022,34 +2022,34 @@ namespace openxr_api_layer {
 
                     bool parsed = false;
                     if (name == "peripheral_multiplier") {
-                        m_peripheralPixelDensity = std::stof(value);
+                        m_peripheralPixelDensity = std::max(0.1f, std::stof(value));
                         parsed = true;
                     } else if (name == "focus_multiplier") {
-                        m_focusPixelDensity = std::stof(value);
+                        m_focusPixelDensity = std::max(0.1f, std::stof(value));
                         parsed = true;
                     } else if (name == "horizontal_fixed_section") {
-                        m_horizontalFovSection[0] = std::stof(value);
+                        m_horizontalFovSection[0] = std::clamp(std::stof(value), 0.1f, 0.9f);
                         parsed = true;
                     } else if (name == "vertical_fixed_section") {
-                        m_verticalFovSection[0] = std::stof(value);
+                        m_verticalFovSection[0] = std::clamp(std::stof(value), 0.1f, 0.9f);
                         parsed = true;
                     } else if (name == "horizontal_focus_section") {
-                        m_horizontalFovSection[1] = std::stof(value);
+                        m_horizontalFovSection[1] = std::clamp(std::stof(value), 0.1f, 0.9f);
                         parsed = true;
                     } else if (name == "vertical_focus_section") {
-                        m_verticalFovSection[1] = std::stof(value);
+                        m_verticalFovSection[1] = std::clamp(std::stof(value), 0.1f, 0.9f);
                         parsed = true;
                     } else if (name == "vertical_focus_bias") {
-                        m_verticalFocusBias = std::stof(value);
+                        m_verticalFocusBias = std::clamp(std::stof(value), -0.5f, 0.5f);
                         parsed = true;
                     } else if (name == "prefer_foveated_rendering") {
                         m_preferFoveatedRendering = std::stoi(value);
                         parsed = true;
                     } else if (name == "smoothen_focus_view_edges") {
-                        m_smoothenFocusViewEdges = std::stof(value);
+                        m_smoothenFocusViewEdges = std::clamp(std::stof(value), 0.f, 0.5f);
                         parsed = true;
                     } else if (name == "sharpen_focus_view") {
-                        m_sharpenFocusView = std::stof(value);
+                        m_sharpenFocusView = std::clamp(std::stof(value), 0.f, 1.f);
                         parsed = true;
                     } else if (name == "turbo_mode") {
                         m_useTurboMode = std::stoi(value);
