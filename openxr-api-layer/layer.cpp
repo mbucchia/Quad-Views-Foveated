@@ -2088,14 +2088,14 @@ namespace openxr_api_layer {
         bool m_isFovMutable{false};
         bool m_isEyeTrackingAvailable{false};
 
-        float m_peripheralPixelDensity{0.5f};
+        float m_peripheralPixelDensity{0.4f};
         float m_focusPixelDensity{1.f};
         // [0] = non-foveated, [1] = foveated
         float m_horizontalFovSection[2]{0.75f, 0.5f};
         float m_verticalFovSection[2]{0.7f, 0.5f};
-        float m_verticalFocusBias{0.f};
+        float m_verticalFocusBias{0.25f};
         bool m_preferFoveatedRendering{true};
-        float m_smoothenFocusViewEdges{0.03f};
+        float m_smoothenFocusViewEdges{0.2f};
         float m_sharpenFocusView{0.7f};
         bool m_useTurboMode{false};
 
