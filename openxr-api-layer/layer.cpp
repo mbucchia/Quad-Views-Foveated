@@ -49,6 +49,7 @@ namespace openxr_api_layer {
     const std::vector<std::string> blockedExtensions = {XR_VARJO_QUAD_VIEWS_EXTENSION_NAME,
                                                         XR_VARJO_FOVEATED_RENDERING_EXTENSION_NAME};
     const std::vector<std::string> implicitExtensions = {XR_KHR_D3D11_ENABLE_EXTENSION_NAME,
+                                                         XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME,
                                                          XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME};
 
     struct ProjectionVSConstants {
@@ -184,17 +185,26 @@ namespace openxr_api_layer {
 
             if (XR_SUCCEEDED(result) && getInfo->formFactor == XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY) {
                 // Check if the system supports eye tracking.
-                XrSystemEyeTrackingPropertiesFB eyeTrackingProperties{XR_TYPE_SYSTEM_EYE_TRACKING_PROPERTIES_FB};
-                eyeTrackingProperties.supportsEyeTracking = XR_FALSE;
+                XrSystemEyeGazeInteractionPropertiesEXT eyeGazeInteractionProperties{
+                    XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT};
+                XrSystemEyeTrackingPropertiesFB eyeTrackingProperties{XR_TYPE_SYSTEM_EYE_TRACKING_PROPERTIES_FB,
+                                                                      &eyeGazeInteractionProperties};
                 XrSystemProperties systemProperties{XR_TYPE_SYSTEM_PROPERTIES};
                 systemProperties.next = &eyeTrackingProperties;
                 CHECK_XRCMD(OpenXrApi::xrGetSystemProperties(instance, *systemId, &systemProperties));
-                TraceLoggingWrite(g_traceProvider,
-                                  "xrGetSystem",
-                                  TLArg(systemProperties.systemName, "SystemName"),
-                                  TLArg(eyeTrackingProperties.supportsEyeTracking, "SupportsEyeTracking"));
+                TraceLoggingWrite(
+                    g_traceProvider,
+                    "xrGetSystem",
+                    TLArg(systemProperties.systemName, "SystemName"),
+                    TLArg(eyeGazeInteractionProperties.supportsEyeGazeInteraction, "SupportsEyeGazeInteraction"),
+                    TLArg(eyeTrackingProperties.supportsEyeTracking, "SupportsEyeTracking"));
 
-                m_isEyeTrackingAvailable = m_debugSimulateTracking || eyeTrackingProperties.supportsEyeTracking;
+                m_isEyeTrackingAvailable = m_debugSimulateTracking || eyeTrackingProperties.supportsEyeTracking ||
+                                           eyeGazeInteractionProperties.supportsEyeGazeInteraction;
+
+                // Prefer the eye gaze interaction extension over the social eye tracking extension.
+                m_useEyeTrackingFB = eyeTrackingProperties.supportsEyeTracking &&
+                                     !eyeGazeInteractionProperties.supportsEyeGazeInteraction;
 
                 if (m_debugForceNoFoveated) {
                     m_isEyeTrackingAvailable = false;
@@ -559,7 +569,23 @@ namespace openxr_api_layer {
             if (XR_SUCCEEDED(result)) {
                 TraceLoggingWrite(g_traceProvider, "xrCreateSession", TLXArg(*session, "Session"));
 
+                if (m_isEyeTrackingAvailable) {
+                    if (!m_debugSimulateTracking) {
+                        if (m_useEyeTrackingFB) {
+                            initializeEyeTrackingFB(*session);
+                        } else {
+                            initializeEyeGazeInteraction(*session);
+                        }
+
+                        XrReferenceSpaceCreateInfo spaceCreateInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+                        spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+                        spaceCreateInfo.poseInReferenceSpace = Pose::Identity();
+                        CHECK_XRCMD(OpenXrApi::xrCreateReferenceSpace(*session, &spaceCreateInfo, &m_viewSpace));
+                    }
+                }
+
                 m_systemId = createInfo->systemId;
+                m_session = *session;
             }
 
             return result;
@@ -636,18 +662,6 @@ namespace openxr_api_layer {
                 // Make sure we have the prerequisite data to compute the views in subsequent calls.
                 populateFovTables(m_systemId, session);
 
-                if (m_isEyeTrackingAvailable) {
-                    if (!m_debugSimulateTracking) {
-                        XrEyeTrackerCreateInfoFB createInfo{XR_TYPE_EYE_TRACKER_CREATE_INFO_FB};
-                        CHECK_XRCMD(OpenXrApi::xrCreateEyeTrackerFB(session, &createInfo, &m_eyeTrackerFB));
-
-                        XrReferenceSpaceCreateInfo spaceCreateInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
-                        spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
-                        spaceCreateInfo.poseInReferenceSpace = Pose::Identity();
-                        CHECK_XRCMD(OpenXrApi::xrCreateReferenceSpace(session, &spaceCreateInfo, &m_viewSpace));
-                    }
-                }
-
                 if (m_useQuadViews) {
                     if (m_smoothenFocusViewEdges) {
                         Log(fmt::format("Edge smoothing: {:.2f}\n", m_smoothenFocusViewEdges));
@@ -662,6 +676,49 @@ namespace openxr_api_layer {
                     Log(fmt::format("Turbo: {}\n", m_useTurboMode ? "Enabled" : "Disabled"));
                 }
             }
+
+            return result;
+        }
+
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrAttachSessionActionSets
+        XrResult xrAttachSessionActionSets(XrSession session, const XrSessionActionSetsAttachInfo* attachInfo) {
+            if (attachInfo->type != XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO) {
+                return XR_ERROR_VALIDATION_FAILURE;
+            }
+
+            TraceLoggingWrite(g_traceProvider, "xrAttachSessionActionSets", TLXArg(session, "Session"));
+            for (uint32_t i = 0; i < attachInfo->countActionSets; i++) {
+                TraceLoggingWrite(
+                    g_traceProvider, "xrAttachSessionActionSets", TLXArg(attachInfo->actionSets[i], "ActionSet"));
+            }
+
+            XrSessionActionSetsAttachInfo chainAttachInfo = *attachInfo;
+            std::vector<XrActionSet> actionSets(chainAttachInfo.actionSets,
+                                                chainAttachInfo.actionSets + chainAttachInfo.countActionSets);
+            if (m_eyeTrackerActionSet != XR_NULL_HANDLE) {
+                // Suggest the bindings for the eye tracker. We do this last in order to override previous bindings the
+                // application may have done.
+                XrActionSuggestedBinding binding;
+                binding.action = m_eyeGazeAction;
+
+                XrInteractionProfileSuggestedBinding suggestedBindings{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING,
+                                                                       nullptr};
+                CHECK_XRCMD(
+                    OpenXrApi::xrStringToPath(GetXrInstance(), "/user/eyes_ext/input/gaze_ext/pose", &binding.binding));
+                CHECK_XRCMD(OpenXrApi::xrStringToPath(OpenXrApi::GetXrInstance(),
+                                                      "/interaction_profiles/ext/eye_gaze_interaction",
+                                                      &suggestedBindings.interactionProfile));
+                suggestedBindings.suggestedBindings = &binding;
+                suggestedBindings.countSuggestedBindings = 1;
+                CHECK_XRCMD(OpenXrApi::xrSuggestInteractionProfileBindings(GetXrInstance(), &suggestedBindings));
+
+                // Inject our actionset.
+                actionSets.push_back(m_eyeTrackerActionSet);
+            }
+            chainAttachInfo.actionSets = actionSets.data();
+            chainAttachInfo.countActionSets = static_cast<uint32_t>(actionSets.size());
+
+            const XrResult result = OpenXrApi::xrAttachSessionActionSets(session, &chainAttachInfo);
 
             return result;
         }
@@ -1023,6 +1080,19 @@ namespace openxr_api_layer {
                     result = XR_SUCCESS;
                 } else {
                     result = OpenXrApi::xrBeginFrame(session, frameBeginInfo);
+                }
+            }
+
+            if (XR_SUCCEEDED(result)) {
+                if (m_useQuadViews && m_isEyeTrackingAvailable && !m_debugSimulateTracking && !m_useEyeTrackingFB) {
+                    // TODO: Some applications may not advance the instance event state machine (via xrPollEvent()),
+                    // which causes actions to always return an inactive state. Force xrPollEvent() here if needed.
+                    XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
+                    XrActiveActionSet actionSet{};
+                    actionSet.actionSet = m_eyeTrackerActionSet;
+                    syncInfo.activeActionSets = &actionSet;
+                    syncInfo.countActiveActionSets = 1;
+                    CHECK_XRCMD(xrSyncActions(session, &syncInfo));
                 }
             }
 
@@ -1393,36 +1463,106 @@ namespace openxr_api_layer {
             ComPtr<ID3D11Texture2D> sharpenedImage[xr::StereoView::Count];
         };
 
+        void initializeEyeTrackingFB(XrSession session) {
+            XrEyeTrackerCreateInfoFB createInfo{XR_TYPE_EYE_TRACKER_CREATE_INFO_FB};
+            CHECK_XRCMD(OpenXrApi::xrCreateEyeTrackerFB(session, &createInfo, &m_eyeTrackerFB));
+        }
+
+        void initializeEyeGazeInteraction(XrSession session) {
+            if (m_eyeTrackerActionSet == XR_NULL_HANDLE) {
+                XrActionSetCreateInfo actionSetCreateInfo{XR_TYPE_ACTION_SET_CREATE_INFO, nullptr};
+                strcpy_s(actionSetCreateInfo.actionSetName, "eye_tracker");
+                strcpy_s(actionSetCreateInfo.localizedActionSetName, "Eye Tracker");
+                actionSetCreateInfo.priority = 0;
+                CHECK_XRCMD(
+                    OpenXrApi::xrCreateActionSet(GetXrInstance(), &actionSetCreateInfo, &m_eyeTrackerActionSet));
+
+                XrActionCreateInfo actionCreateInfo{XR_TYPE_ACTION_CREATE_INFO, nullptr};
+                strcpy_s(actionCreateInfo.actionName, "eye_tracker");
+                strcpy_s(actionCreateInfo.localizedActionName, "Eye Tracker");
+                actionCreateInfo.actionType = XR_ACTION_TYPE_POSE_INPUT;
+                actionCreateInfo.countSubactionPaths = 0;
+                CHECK_XRCMD(OpenXrApi::xrCreateAction(m_eyeTrackerActionSet, &actionCreateInfo, &m_eyeGazeAction));
+            }
+
+            XrActionSpaceCreateInfo actionSpaceCreateInfo{XR_TYPE_ACTION_SPACE_CREATE_INFO, nullptr};
+            actionSpaceCreateInfo.action = m_eyeGazeAction;
+            actionSpaceCreateInfo.subactionPath = XR_NULL_PATH;
+            actionSpaceCreateInfo.poseInActionSpace = Pose::Identity();
+            CHECK_XRCMD(OpenXrApi::xrCreateActionSpace(session, &actionSpaceCreateInfo, &m_eyeSpace));
+        }
+
+        bool getEyeTrackerFB(XrTime time, bool getStateOnly, XrVector3f& unitVector) {
+            XrEyeGazesInfoFB eyeGazeInfo{XR_TYPE_EYE_GAZES_INFO_FB};
+            eyeGazeInfo.baseSpace = m_viewSpace;
+            eyeGazeInfo.time = time;
+
+            XrEyeGazesFB eyeGaze{XR_TYPE_EYE_GAZES_FB};
+            CHECK_XRCMD(OpenXrApi::xrGetEyeGazesFB(m_eyeTrackerFB, &eyeGazeInfo, &eyeGaze));
+
+            if (!(eyeGaze.gaze[0].isValid && eyeGaze.gaze[1].isValid)) {
+                return false;
+            }
+
+            if (!(eyeGaze.gaze[0].gazeConfidence > 0.5f && eyeGaze.gaze[1].gazeConfidence > 0.5f)) {
+                return false;
+            }
+
+            if (!getStateOnly) {
+                // Average the poses from both eyes.
+                const auto gaze = LoadXrPose(Pose::Slerp(eyeGaze.gaze[0].gazePose, eyeGaze.gaze[1].gazePose, 0.5f));
+                const auto gazeProjectedPoint =
+                    DirectX::XMVector3Transform(DirectX::XMVectorSet(0.f, 0.f, 1.f, 1.f), gaze);
+
+                unitVector.x = gazeProjectedPoint.m128_f32[0];
+                unitVector.y = -gazeProjectedPoint.m128_f32[1];
+                unitVector.z = gazeProjectedPoint.m128_f32[2];
+            }
+
+            return true;
+        }
+
+        bool getEyeGazeInteraction(XrTime time, bool getStateOnly, XrVector3f& unitVector) {
+            XrActionStatePose actionStatePose{XR_TYPE_ACTION_STATE_POSE, nullptr};
+            XrActionStateGetInfo getInfo{XR_TYPE_ACTION_STATE_GET_INFO, nullptr};
+            getInfo.action = m_eyeGazeAction;
+            CHECK_XRCMD(OpenXrApi::xrGetActionStatePose(m_session, &getInfo, &actionStatePose));
+
+            if (!actionStatePose.isActive) {
+                return false;
+            }
+
+            XrSpaceLocation location{XR_TYPE_SPACE_LOCATION, nullptr};
+            CHECK_XRCMD(OpenXrApi::xrLocateSpace(m_eyeSpace, m_viewSpace, time, &location));
+
+            if (!Pose::IsPoseValid(location.locationFlags)) {
+                return false;
+            }
+
+            if (!getStateOnly) {
+                const auto gaze = LoadXrPose(location.pose);
+                const auto gazeProjectedPoint =
+                    DirectX::XMVector3Transform(DirectX::XMVectorSet(0.f, 0.f, 1.f, 1.f), gaze);
+
+                unitVector.x = gazeProjectedPoint.m128_f32[0];
+                unitVector.y = -gazeProjectedPoint.m128_f32[1];
+                unitVector.z = gazeProjectedPoint.m128_f32[2];
+            }
+
+            return true;
+        }
+
         bool getEyeGaze(XrTime time, bool getStateOnly, XrVector3f& unitVector) {
             if (!m_isEyeTrackingAvailable) {
                 return false;
             }
 
+            bool result = false;
             if (!m_debugSimulateTracking) {
-                XrEyeGazesInfoFB eyeGazeInfo{XR_TYPE_EYE_GAZES_INFO_FB};
-                eyeGazeInfo.baseSpace = m_viewSpace;
-                eyeGazeInfo.time = time;
-
-                XrEyeGazesFB eyeGaze{XR_TYPE_EYE_GAZES_FB};
-                CHECK_XRCMD(OpenXrApi::xrGetEyeGazesFB(m_eyeTrackerFB, &eyeGazeInfo, &eyeGaze));
-
-                if (!(eyeGaze.gaze[0].isValid && eyeGaze.gaze[1].isValid)) {
-                    return false;
-                }
-
-                if (!(eyeGaze.gaze[0].gazeConfidence > 0.5f && eyeGaze.gaze[1].gazeConfidence > 0.5f)) {
-                    return false;
-                }
-
-                if (!getStateOnly) {
-                    // Average the poses from both eyes.
-                    const auto gaze = LoadXrPose(Pose::Slerp(eyeGaze.gaze[0].gazePose, eyeGaze.gaze[1].gazePose, 0.5f));
-                    const auto gazeProjectedPoint =
-                        DirectX::XMVector3Transform(DirectX::XMVectorSet(0.f, 0.f, 1.f, 1.f), gaze);
-
-                    unitVector.x = gazeProjectedPoint.m128_f32[0];
-                    unitVector.y = -gazeProjectedPoint.m128_f32[1];
-                    unitVector.z = gazeProjectedPoint.m128_f32[2];
+                if (m_useEyeTrackingFB) {
+                    result = getEyeTrackerFB(time, getStateOnly, unitVector);
+                } else {
+                    result = getEyeGazeInteraction(time, getStateOnly, unitVector);
                 }
             } else {
                 // Use the mouse to simulate eye tracking.
@@ -1438,12 +1578,16 @@ namespace openxr_api_layer {
 
                 XrVector2f point = {(float)cursor.x / 1000.f, (1000.f - cursor.y) / 1000.f};
                 unitVector = Normalize({point.x - 0.5f, 0.5f - point.y, -0.35f});
+
+                result = true;
             }
 
-            TraceLoggingWrite(
-                g_traceProvider, "xrLocateViews_EyeGaze", TLArg(xr::ToString(unitVector).c_str(), "GazeUnitVector"));
+            TraceLoggingWrite(g_traceProvider,
+                              "xrLocateViews_EyeGaze",
+                              TLArg(result, "Valid"),
+                              TLArg(xr::ToString(unitVector).c_str(), "GazeUnitVector"));
 
-            return true;
+            return result;
         }
 
         void compositeViewContent(uint32_t viewIndex,
@@ -2157,6 +2301,7 @@ namespace openxr_api_layer {
         bool m_requestedFoveatedRendering{false};
         bool m_loggedResolution{false};
         bool m_isEyeTrackingAvailable{false};
+        bool m_useEyeTrackingFB{true};
 
         XrSystemId m_systemId{XR_NULL_SYSTEM_ID};
 
@@ -2187,7 +2332,12 @@ namespace openxr_api_layer {
         std::mutex m_spacesMutex;
         std::set<XrSpace> m_gazeSpaces;
 
+        XrSession m_session{XR_NULL_HANDLE};
+
         XrEyeTrackerFB m_eyeTrackerFB{XR_NULL_HANDLE};
+        XrActionSet m_eyeTrackerActionSet{XR_NULL_HANDLE};
+        XrAction m_eyeGazeAction{XR_NULL_HANDLE};
+        XrSpace m_eyeSpace{XR_NULL_HANDLE};
         XrSpace m_viewSpace{XR_NULL_HANDLE};
 
         ComPtr<ID3D11Device5> m_applicationDevice;
