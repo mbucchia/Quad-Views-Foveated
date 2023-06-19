@@ -1487,6 +1487,14 @@ namespace openxr_api_layer {
                                                     applicationContextState.ReleaseAndGetAddressOf());
             m_renderContext->ClearState();
 
+            if (IsTraceEnabled()) {
+                m_timerIndex = (m_timerIndex + 1) % std::size(m_compositionTimer);
+                TraceLoggingWrite(g_traceProvider,
+                                  "xrEndFrame_Perf",
+                                  TLArg(m_compositionTimer[m_timerIndex]->query(), "CompositionTime"));
+                m_compositionTimer[m_timerIndex]->start();
+            }
+
             // Copy to a flat texture for sampling.
             const auto flattenSourceImage = [&](ID3D11Texture2D* image,
                                                 const XrCompositionLayerProjectionView& view,
@@ -1693,6 +1701,10 @@ namespace openxr_api_layer {
             m_renderContext->PSSetShader(m_projectionPS.Get(), nullptr, 0);
             m_renderContext->Draw(3, 0);
 
+            if (IsTraceEnabled()) {
+                m_compositionTimer[m_timerIndex]->stop();
+            }
+
             // Restore the application context state.
             m_renderContext->SwapDeviceContextState(applicationContextState.Get(), nullptr);
 
@@ -1782,6 +1794,17 @@ namespace openxr_api_layer {
             }
             CHECK_HRCMD(m_applicationDevice->CreateComputeShader(
                 g_SharpeningCS, sizeof(g_SharpeningCS), nullptr, m_sharpeningCS.ReleaseAndGetAddressOf()));
+
+            // For statistics.
+            {
+                XrGraphicsBindingD3D11KHR bindings{};
+                bindings.device = device;
+                std::shared_ptr<graphics::IGraphicsDevice> graphicsDevice =
+                    graphics::internal::wrapApplicationDevice(bindings);
+                for (uint32_t i = 0; i < std::size(m_compositionTimer); i++) {
+                    m_compositionTimer[i] = graphicsDevice->createTimer();
+                }
+            }
         }
 
         void populateFovTables(XrSystemId systemId) {
@@ -2167,6 +2190,9 @@ namespace openxr_api_layer {
         bool m_debugSimulateTracking{false};
         bool m_debugForceNoFoveated{false};
         bool m_debugKeys{false};
+
+        std::shared_ptr<graphics::IGraphicsTimer> m_compositionTimer[3];
+        uint32_t m_timerIndex{0};
     };
 
     // This method is required by the framework to instantiate your OpenXrApi implementation.
