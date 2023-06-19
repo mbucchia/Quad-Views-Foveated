@@ -628,17 +628,19 @@ namespace openxr_api_layer {
                     }
                 }
 
-                if (m_smoothenFocusViewEdges) {
-                    Log(fmt::format("Edge smoothing: {:.2f}\n", m_smoothenFocusViewEdges));
-                } else {
-                    Log("Edge smoothing: Disabled\n");
+                if (m_useQuadViews) {
+                    if (m_smoothenFocusViewEdges) {
+                        Log(fmt::format("Edge smoothing: {:.2f}\n", m_smoothenFocusViewEdges));
+                    } else {
+                        Log("Edge smoothing: Disabled\n");
+                    }
+                    if (m_sharpenFocusView) {
+                        Log(fmt::format("Sharpening: {:.2f}\n", m_sharpenFocusView));
+                    } else {
+                        Log("Sharpening: Disabled\n");
+                    }
+                    Log(fmt::format("Turbo: {}\n", m_useTurboMode ? "Enabled" : "Disabled"));
                 }
-                if (m_sharpenFocusView) {
-                    Log(fmt::format("Sharpening: {:.2f}\n", m_sharpenFocusView));
-                } else {
-                    Log("Sharpening: Disabled\n");
-                }
-                Log(fmt::format("Turbo: {}\n", m_useTurboMode ? "Enabled" : "Disabled"));
             }
 
             return result;
