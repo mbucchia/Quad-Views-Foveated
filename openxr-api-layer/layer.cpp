@@ -1710,8 +1710,6 @@ namespace openxr_api_layer {
 
                 CHECK_HRCMD(device->QueryInterface(m_applicationDevice.ReleaseAndGetAddressOf()));
 
-                CHECK_HRCMD(device->QueryInterface(m_applicationDevice.ReleaseAndGetAddressOf()));
-
                 // Create a switchable context state for the API layer.
                 CHECK_HRCMD(
                     m_applicationDevice->CreateDeviceContextState(creationFlags,
@@ -1726,7 +1724,7 @@ namespace openxr_api_layer {
             // For FOV projection.
             {
                 ComPtr<ID3D11DeviceContext> context;
-                device->GetImmediateContext(context.ReleaseAndGetAddressOf());
+                m_applicationDevice->GetImmediateContext(context.ReleaseAndGetAddressOf());
                 CHECK_HRCMD(context->QueryInterface(m_renderContext.ReleaseAndGetAddressOf()));
             }
             {
@@ -1738,14 +1736,16 @@ namespace openxr_api_layer {
                 desc.MaxAnisotropy = 1;
                 desc.MinLOD = D3D11_MIP_LOD_BIAS_MIN;
                 desc.MaxLOD = D3D11_MIP_LOD_BIAS_MAX;
-                CHECK_HRCMD(device->CreateSamplerState(&desc, m_linearClampSampler.ReleaseAndGetAddressOf()));
+                CHECK_HRCMD(
+                    m_applicationDevice->CreateSamplerState(&desc, m_linearClampSampler.ReleaseAndGetAddressOf()));
             }
             {
                 D3D11_RASTERIZER_DESC desc{};
                 desc.FillMode = D3D11_FILL_SOLID;
                 desc.CullMode = D3D11_CULL_NONE;
                 desc.FrontCounterClockwise = TRUE;
-                CHECK_HRCMD(device->CreateRasterizerState(&desc, m_noDepthRasterizer.ReleaseAndGetAddressOf()));
+                CHECK_HRCMD(
+                    m_applicationDevice->CreateRasterizerState(&desc, m_noDepthRasterizer.ReleaseAndGetAddressOf()));
             }
             {
                 D3D11_BUFFER_DESC desc{};
@@ -1753,7 +1753,8 @@ namespace openxr_api_layer {
                 desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
                 desc.Usage = D3D11_USAGE_DYNAMIC;
                 desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-                CHECK_HRCMD(device->CreateBuffer(&desc, nullptr, m_projectionVSConstants.ReleaseAndGetAddressOf()));
+                CHECK_HRCMD(m_applicationDevice->CreateBuffer(
+                    &desc, nullptr, m_projectionVSConstants.ReleaseAndGetAddressOf()));
             }
             {
                 D3D11_BUFFER_DESC desc{};
@@ -1761,11 +1762,12 @@ namespace openxr_api_layer {
                 desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
                 desc.Usage = D3D11_USAGE_DYNAMIC;
                 desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-                CHECK_HRCMD(device->CreateBuffer(&desc, nullptr, m_projectionPSConstants.ReleaseAndGetAddressOf()));
+                CHECK_HRCMD(m_applicationDevice->CreateBuffer(
+                    &desc, nullptr, m_projectionPSConstants.ReleaseAndGetAddressOf()));
             }
-            CHECK_HRCMD(device->CreateVertexShader(
+            CHECK_HRCMD(m_applicationDevice->CreateVertexShader(
                 g_ProjectionVS, sizeof(g_ProjectionVS), nullptr, m_projectionVS.ReleaseAndGetAddressOf()));
-            CHECK_HRCMD(device->CreatePixelShader(
+            CHECK_HRCMD(m_applicationDevice->CreatePixelShader(
                 g_ProjectionPS, sizeof(g_ProjectionPS), nullptr, m_projectionPS.ReleaseAndGetAddressOf()));
 
             // For CAS sharpening.
@@ -1775,9 +1777,10 @@ namespace openxr_api_layer {
                 desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
                 desc.Usage = D3D11_USAGE_DYNAMIC;
                 desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-                CHECK_HRCMD(device->CreateBuffer(&desc, nullptr, m_sharpeningCSConstants.ReleaseAndGetAddressOf()));
+                CHECK_HRCMD(m_applicationDevice->CreateBuffer(
+                    &desc, nullptr, m_sharpeningCSConstants.ReleaseAndGetAddressOf()));
             }
-            CHECK_HRCMD(device->CreateComputeShader(
+            CHECK_HRCMD(m_applicationDevice->CreateComputeShader(
                 g_SharpeningCS, sizeof(g_SharpeningCS), nullptr, m_sharpeningCS.ReleaseAndGetAddressOf()));
         }
 
