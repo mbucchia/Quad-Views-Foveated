@@ -125,6 +125,8 @@ namespace openxr_api_layer {
                     requestedQuadViews = true;
                 } else if (ext == XR_VARJO_FOVEATED_RENDERING_EXTENSION_NAME) {
                     m_requestedFoveatedRendering = true;
+                } else if (ext == XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME) {
+                    m_requestedDepthSubmission = true;
                 } else if (ext == XR_KHR_D3D11_ENABLE_EXTENSION_NAME) {
                     requestedD3D11 = true;
                 }
@@ -149,6 +151,9 @@ namespace openxr_api_layer {
 
             // Parse the configuration.
             LoadConfiguration();
+
+            // Platform-specific quirks.
+            m_needDeferredSwapchainReleaseQuirk = runtimeName.find("Varjo") != std::string::npos;
 
             // Game-specific quirks.
             m_needFocusFovCorrectionQuirk = GetApplicationName() == "DCS World";
@@ -964,6 +969,22 @@ namespace openxr_api_layer {
                                          uint32_t* index) override {
             TraceLoggingWrite(g_traceProvider, "xrAcquireSwapchainImage", TLXArg(swapchain, "Swapchain"));
 
+            if (m_useQuadViews && m_needDeferredSwapchainReleaseQuirk) {
+                std::unique_lock lock(m_swapchainsMutex);
+
+                auto it = m_swapchains.find(swapchain);
+                if (it != m_swapchains.end()) {
+                    if (it->second.deferredRelease) {
+                        // Release the previous image before acquiring a new one.
+                        TraceLoggingWrite(g_traceProvider,
+                                          "xrAcquireSwapchainImage_DeferredSwapchainRelease",
+                                          TLXArg(swapchain, "Swapchain"));
+                        CHECK_XRCMD(OpenXrApi::xrReleaseSwapchainImage(swapchain, nullptr));
+                        it->second.deferredRelease = false;
+                    }
+                }
+            }
+
             const XrResult result = OpenXrApi::xrAcquireSwapchainImage(swapchain, acquireInfo, index);
 
             if (XR_SUCCEEDED(result)) {
@@ -982,7 +1003,24 @@ namespace openxr_api_layer {
                                          const XrSwapchainImageReleaseInfo* releaseInfo) override {
             TraceLoggingWrite(g_traceProvider, "xrReleaseSwapchainImage", TLXArg(swapchain, "Swapchain"));
 
-            const XrResult result = OpenXrApi::xrReleaseSwapchainImage(swapchain, releaseInfo);
+            bool deferRelease = false;
+            if (m_useQuadViews && m_needDeferredSwapchainReleaseQuirk) {
+                std::unique_lock lock(m_swapchainsMutex);
+
+                auto it = m_swapchains.find(swapchain);
+                if (it != m_swapchains.end()) {
+                    // Defer release to ensure that xrEndFrame() can sample the image written by the application.
+                    deferRelease = it->second.deferredRelease = true;
+                }
+            }
+
+            XrResult result = XR_ERROR_RUNTIME_FAILURE;
+            if (!deferRelease) {
+                result = OpenXrApi::xrReleaseSwapchainImage(swapchain, releaseInfo);
+            } else {
+                TraceLoggingWrite(g_traceProvider, "xrReleaseSwapchainImage_Defer");
+                result = XR_SUCCESS;
+            }
 
             if (XR_SUCCEEDED(result)) {
                 std::unique_lock lock(m_swapchainsMutex);
@@ -1125,6 +1163,8 @@ namespace openxr_api_layer {
             XrFrameEndInfo chainFrameEndInfo = *frameEndInfo;
 
             if (m_useQuadViews) {
+                std::set<XrSwapchain> swapchainsToRelease;
+
                 for (uint32_t i = 0; i < frameEndInfo->layerCount; i++) {
                     if (!frameEndInfo->layers[i]) {
                         return XR_ERROR_LAYER_INVALID;
@@ -1152,6 +1192,7 @@ namespace openxr_api_layer {
                                 TraceLoggingWrite(
                                     g_traceProvider,
                                     "xrEndFrame_View",
+                                    TLArg("Color", "Type"),
                                     TLArg(i, "ViewIndex"),
                                     TLXArg(proj->views[i].subImage.swapchain, "Swapchain"),
                                     TLArg(proj->views[i].subImage.imageArrayIndex, "ImageArrayIndex"),
@@ -1172,6 +1213,15 @@ namespace openxr_api_layer {
 
                             Swapchain& swapchainForStereoView = it->second;
                             Swapchain& swapchainForFocusView = it2->second;
+
+                            if (swapchainForStereoView.deferredRelease) {
+                                swapchainsToRelease.insert(proj->views[viewIndex].subImage.swapchain);
+                                swapchainForStereoView.deferredRelease = false;
+                            }
+                            if (swapchainForFocusView.deferredRelease) {
+                                swapchainsToRelease.insert(proj->views[focusViewIndex].subImage.swapchain);
+                                swapchainForFocusView.deferredRelease = false;
+                            }
 
                             // Allocate a destination swapchain.
                             if (swapchainForStereoView.fullFovSwapchain[viewIndex] == XR_NULL_HANDLE) {
@@ -1212,6 +1262,43 @@ namespace openxr_api_layer {
                             patchedView.subImage.imageArrayIndex = 0;
                             patchedView.subImage.imageRect.offset = {0, 0};
                             patchedView.subImage.imageRect.extent = m_fullFovResolution;
+
+                            if (m_requestedDepthSubmission && m_needDeferredSwapchainReleaseQuirk) {
+                                const XrBaseInStructure* entry =
+                                    reinterpret_cast<const XrBaseInStructure*>(proj->views[viewIndex].next);
+                                while (entry) {
+                                    if (entry->type == XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR) {
+                                        const XrCompositionLayerDepthInfoKHR* depth =
+                                            reinterpret_cast<const XrCompositionLayerDepthInfoKHR*>(entry);
+
+                                        TraceLoggingWrite(
+                                            g_traceProvider,
+                                            "xrEndFrame_View",
+                                            TLArg("Depth", "Type"),
+                                            TLArg(viewIndex, "ViewIndex"),
+                                            TLXArg(depth->subImage.swapchain, "Swapchain"),
+                                            TLArg(depth->subImage.imageArrayIndex, "ImageArrayIndex"),
+                                            TLArg(xr::ToString(depth->subImage.imageRect).c_str(), "ImageRect"),
+                                            TLArg(depth->nearZ, "Near"),
+                                            TLArg(depth->farZ, "Far"),
+                                            TLArg(depth->minDepth, "MinDepth"),
+                                            TLArg(depth->maxDepth, "MaxDepth"));
+
+                                        const auto it = m_swapchains.find(depth->subImage.swapchain);
+                                        if (it == m_swapchains.end()) {
+                                            return XR_ERROR_HANDLE_INVALID;
+                                        }
+
+                                        Swapchain& swapchainForDepthInfo = it->second;
+
+                                        if (swapchainForDepthInfo.deferredRelease) {
+                                            swapchainsToRelease.insert(depth->subImage.swapchain);
+                                            swapchainForDepthInfo.deferredRelease = false;
+                                        }
+                                    }
+                                    entry = entry->next;
+                                }
+                            }
                         }
 
                         // Note: if a depth buffer was attached, we will use it as-is (per copy of the proj struct
@@ -1226,6 +1313,24 @@ namespace openxr_api_layer {
                         layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&projectionAllocator.back()));
 
                     } else {
+                        if (m_needDeferredSwapchainReleaseQuirk) {
+                            if (frameEndInfo->layers[i]->type == XR_TYPE_COMPOSITION_LAYER_QUAD) {
+                                const XrCompositionLayerQuad* quad =
+                                    reinterpret_cast<const XrCompositionLayerQuad*>(frameEndInfo->layers[i]);
+
+                                std::unique_lock lock(m_swapchainsMutex);
+
+                                const auto it = m_swapchains.find(quad->subImage.swapchain);
+                                if (it != m_swapchains.end() && it->second.deferredRelease) {
+                                    swapchainsToRelease.insert(quad->subImage.swapchain);
+                                    it->second.deferredRelease = false;
+                                }
+                            }
+                            // TODO: We need to handle all other types of composition layers in order to mark the
+                            // swapchains for deferred release. Luckily we only need this quirk on Varjo and the runtime
+                            // does not support any other type of composition layers.
+                        }
+
                         TraceLoggingWrite(g_traceProvider,
                                           "xrEndFrame_Layer",
                                           TLArg(xr::ToCString(frameEndInfo->layers[i]->type), "Type"));
@@ -1247,6 +1352,14 @@ namespace openxr_api_layer {
                     TraceLoggingWrite(g_traceProvider,
                                       "xrEndFrame",
                                       TLArg(m_focusFovForDisplayTime.size(), "FovForDisplayTimeDictionarySize"));
+                }
+
+                // Perform deferred swapchains release now.
+                for (auto swapchain : swapchainsToRelease) {
+                    TraceLoggingWrite(
+                        g_traceProvider, "xrEndFrame_DeferredSwapchainRelease", TLXArg(swapchain, "Swapchain"));
+
+                    CHECK_XRCMD(OpenXrApi::xrReleaseSwapchainImage(swapchain, nullptr));
                 }
             }
 
@@ -1456,6 +1569,7 @@ namespace openxr_api_layer {
         struct Swapchain {
             std::deque<uint32_t> acquiredIndex;
             uint32_t lastReleasedIndex{0};
+            bool deferredRelease{false};
 
             XrSwapchainCreateInfo createInfo{};
             XrSwapchain fullFovSwapchain[xr::StereoView::Count]{XR_NULL_HANDLE, XR_NULL_HANDLE};
@@ -2299,6 +2413,7 @@ namespace openxr_api_layer {
         bool m_bypassApiLayer{false};
         bool m_useQuadViews{false};
         bool m_requestedFoveatedRendering{false};
+        bool m_requestedDepthSubmission{false};
         bool m_loggedResolution{false};
         bool m_isEyeTrackingAvailable{false};
         bool m_useEyeTrackingFB{true};
@@ -2362,6 +2477,8 @@ namespace openxr_api_layer {
         XrTime m_lastPredictedDisplayPeriod{0};
         bool m_asyncWaitPolled{false};
         bool m_asyncWaitCompleted{false};
+
+        bool m_needDeferredSwapchainReleaseQuirk{false};
 
         // FOV submission quirk.
         bool m_needFocusFovCorrectionQuirk{false};
