@@ -52,18 +52,18 @@ namespace openxr_api_layer {
                                                          XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME};
 
     struct ProjectionVSConstants {
-        DirectX::XMFLOAT4X4 Projection;
+        alignas(16) DirectX::XMFLOAT4X4 focusProjection;
     };
 
     struct ProjectionPSConstants {
-        float smoothingArea;
-        bool isUnpremultipliedAlpha;
-        uint8_t padding[11];
+        alignas(4) float smoothingArea;
+        alignas(4) bool isUnpremultipliedAlpha;
+        alignas(4) bool debugFocusView;
     };
 
     struct SharpeningCSConstants {
-        uint32_t Const0[4];
-        uint32_t Const1[4];
+        alignas(4) uint32_t Const0[4];
+        alignas(4) uint32_t Const1[4];
     };
 
     // This class implements our API layer.
@@ -543,12 +543,6 @@ namespace openxr_api_layer {
 
             if (XR_SUCCEEDED(result)) {
                 TraceLoggingWrite(g_traceProvider, "xrCreateSession", TLXArg(*session, "Session"));
-
-                XrViewConfigurationProperties properties{XR_TYPE_VIEW_CONFIGURATION_PROPERTIES};
-                CHECK_XRCMD(OpenXrApi::xrGetViewConfigurationProperties(
-                    instance, createInfo->systemId, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, &properties));
-                m_isFovMutable = properties.fovMutable;
-                Log(fmt::format("fovMutable is {}\n", m_isFovMutable ? "supported" : "not supported"));
             }
 
             return result;
@@ -1030,9 +1024,9 @@ namespace openxr_api_layer {
             std::vector<std::array<XrCompositionLayerProjectionView, xr::StereoView::Count>> projectionViewAllocator;
             std::vector<const XrCompositionLayerBaseHeader*> layers;
 
-            // Ensure pointers remain stable. We may push up to 2 layers for each layer.
-            projectionAllocator.reserve(frameEndInfo->layerCount * 2);
-            projectionViewAllocator.reserve(frameEndInfo->layerCount * 2);
+            // Ensure pointers within the collections remain stable.
+            projectionAllocator.reserve(frameEndInfo->layerCount);
+            projectionViewAllocator.reserve(frameEndInfo->layerCount);
 
             XrFrameEndInfo chainFrameEndInfo = *frameEndInfo;
 
@@ -1056,91 +1050,85 @@ namespace openxr_api_layer {
                             return XR_ERROR_VALIDATION_FAILURE;
                         }
 
-                        // Quad views uses 2 stereo layers.
-                        for (uint32_t viewIndex = 0; viewIndex < proj->viewCount; viewIndex++) {
-                            if (!(viewIndex % xr::StereoView::Count)) {
-                                // Start a new set of views.
-                                projectionViewAllocator.push_back({proj->views[viewIndex], proj->views[viewIndex + 1]});
+                        projectionViewAllocator.push_back(
+                            {proj->views[xr::StereoView::Left], proj->views[xr::StereoView::Right]});
+
+                        for (uint32_t viewIndex = 0; viewIndex < xr::StereoView::Count; viewIndex++) {
+                            for (uint32_t i = viewIndex; i < xr::QuadView::Count; i += xr::StereoView::Count) {
+                                TraceLoggingWrite(
+                                    g_traceProvider,
+                                    "xrEndFrame_View",
+                                    TLArg(viewIndex + i, "ViewIndex"),
+                                    TLXArg(proj->views[viewIndex + i].subImage.swapchain, "Swapchain"),
+                                    TLArg(proj->views[viewIndex + i].subImage.imageArrayIndex, "ImageArrayIndex"),
+                                    TLArg(xr::ToString(proj->views[viewIndex + i].subImage.imageRect).c_str(),
+                                          "ImageRect"),
+                                    TLArg(xr::ToString(proj->views[viewIndex + i].pose).c_str(), "Pose"),
+                                    TLArg(xr::ToString(proj->views[viewIndex + i].fov).c_str(), "Fov"));
                             }
 
-                            TraceLoggingWrite(
-                                g_traceProvider,
-                                "xrEndFrame_View",
-                                TLArg(viewIndex, "ViewIndex"),
-                                TLXArg(proj->views[viewIndex].subImage.swapchain, "Swapchain"),
-                                TLArg(proj->views[viewIndex].subImage.imageArrayIndex, "ImageArrayIndex"),
-                                TLArg(xr::ToString(proj->views[viewIndex].subImage.imageRect).c_str(), "ImageRect"),
-                                TLArg(xr::ToString(proj->views[viewIndex].pose).c_str(), "Pose"),
-                                TLArg(xr::ToString(proj->views[viewIndex].fov).c_str(), "Fov"));
+                            const uint32_t focusViewIndex = viewIndex + xr::StereoView::Count;
 
-                            if (!m_isFovMutable || m_smoothenFocusViewEdges || m_sharpenFocusView) {
-                                // Do our own FOV composition when the platform does not support it.
-                                if (viewIndex >= xr::StereoView::Count) {
-                                    const uint32_t referenceViewIndex = viewIndex % xr::StereoView::Count;
+                            std::unique_lock lock(m_swapchainsMutex);
 
-                                    std::unique_lock lock(m_swapchainsMutex);
+                            const auto it = m_swapchains.find(proj->views[viewIndex].subImage.swapchain);
+                            const auto it2 = m_swapchains.find(proj->views[focusViewIndex].subImage.swapchain);
+                            if (it == m_swapchains.end() || it2 == m_swapchains.end()) {
+                                return XR_ERROR_HANDLE_INVALID;
+                            }
 
-                                    const auto it = m_swapchains.find(proj->views[viewIndex].subImage.swapchain);
-                                    if (it == m_swapchains.end()) {
-                                        return XR_ERROR_HANDLE_INVALID;
-                                    }
+                            Swapchain& swapchainForStereoView = it->second;
+                            Swapchain& swapchainForFocusView = it2->second;
 
-                                    Swapchain& entry = it->second;
+                            // Allocate a destination swapchain.
+                            if (swapchainForStereoView.fullFovSwapchain[viewIndex] == XR_NULL_HANDLE) {
+                                XrSwapchainCreateInfo createInfo = swapchainForStereoView.createInfo;
+                                createInfo.arraySize = 1;
+                                createInfo.width = m_fullFovResolution.width;
+                                createInfo.height = m_fullFovResolution.height;
+                                CHECK_XRCMD(OpenXrApi::xrCreateSwapchain(
+                                    session, &createInfo, &swapchainForStereoView.fullFovSwapchain[viewIndex]));
+                            }
 
-                                    // Allocate a swapchain for the full FOV.
-                                    if (entry.fullFovSwapchain[referenceViewIndex] == XR_NULL_HANDLE) {
-                                        XrSwapchainCreateInfo createInfo = entry.createInfo;
-                                        createInfo.arraySize = 1;
-                                        createInfo.width = m_fullFovResolution.width;
-                                        createInfo.height = m_fullFovResolution.height;
-                                        CHECK_XRCMD(OpenXrApi::xrCreateSwapchain(
-                                            session, &createInfo, &entry.fullFovSwapchain[referenceViewIndex]));
-                                    }
+                            XrCompositionLayerProjectionView focusView = proj->views[focusViewIndex];
+                            if (m_needFocusFovCorrectionQuirk) {
+                                // Quirk for DCS World: the application does not pass the correct FOV for the
+                                // focus views in xrEndFrame(). We must keep track of the correct values for
+                                // each frame.
+                                std::unique_lock lock(m_focusFovMutex);
 
-                                    XrCompositionLayerProjectionView view = proj->views[viewIndex];
-                                    if (m_needFocusFovCorrectionQuirk && viewIndex >= xr::StereoView::Count) {
-                                        // Quirk for DCS World: the application does not pass the correct FOV for the
-                                        // focus views in xrEndFrame(). We must keep track of the correct values for
-                                        // each frame.
-                                        std::unique_lock lock(m_focusFovMutex);
-
-                                        const auto& cit = m_focusFovForDisplayTime.find(frameEndInfo->displayTime);
-                                        if (cit != m_focusFovForDisplayTime.cend()) {
-                                            view.fov = viewIndex == xr::QuadView::FocusLeft ? cit->second.first
-                                                                                            : cit->second.second;
-                                        }
-                                    }
-
-                                    // Relocate the view's content to a full FOV texture and apply smoothening and/or
-                                    // sharpening.
-                                    processViewContent(view, entry, proj->layerFlags, referenceViewIndex);
-
-                                    // Patch the view to reference the new swapchain at full FOV.
-                                    XrCompositionLayerProjectionView& patchedView =
-                                        projectionViewAllocator.back()[viewIndex % xr::StereoView::Count];
-                                    patchedView.fov = m_cachedEyeFov[referenceViewIndex];
-                                    patchedView.subImage.swapchain = entry.fullFovSwapchain[referenceViewIndex];
-                                    patchedView.subImage.imageArrayIndex = 0;
-                                    patchedView.subImage.imageRect.offset = {0, 0};
-                                    patchedView.subImage.imageRect.extent = m_fullFovResolution;
+                                const auto& cit = m_focusFovForDisplayTime.find(frameEndInfo->displayTime);
+                                if (cit != m_focusFovForDisplayTime.cend()) {
+                                    focusView.fov = focusViewIndex == xr::QuadView::FocusLeft ? cit->second.first
+                                                                                              : cit->second.second;
                                 }
-
-                                // TODO: Handling of depth submission (uncommon).
                             }
+
+                            // Composite the focus view and the stereo view together into a single stereo view.
+                            compositeViewContent(viewIndex,
+                                                 proj->views[viewIndex],
+                                                 swapchainForStereoView,
+                                                 focusView,
+                                                 swapchainForFocusView,
+                                                 proj->layerFlags);
+
+                            // Patch the view to reference the new swapchain at full FOV.
+                            XrCompositionLayerProjectionView& patchedView = projectionViewAllocator.back()[viewIndex];
+                            patchedView.fov = m_cachedEyeFov[viewIndex];
+                            patchedView.subImage.swapchain = swapchainForStereoView.fullFovSwapchain[viewIndex];
+                            patchedView.subImage.imageArrayIndex = 0;
+                            patchedView.subImage.imageRect.offset = {0, 0};
+                            patchedView.subImage.imageRect.extent = m_fullFovResolution;
                         }
 
-                        if (!m_debugFocusView) {
-                            projectionAllocator.push_back(*proj);
-                            projectionAllocator.back().views =
-                                projectionViewAllocator.at(projectionViewAllocator.size() - 2).data();
-                            projectionAllocator.back().viewCount = xr::StereoView::Count;
-                            layers.push_back(
-                                reinterpret_cast<XrCompositionLayerBaseHeader*>(&projectionAllocator.back()));
-                        }
+                        // Note: if a depth buffer was attached, we will use it as-is (per copy of the proj struct
+                        // below, and therefore its entire chain of next structs). This is good: we will submit a depth
+                        // that matches the composited view, but that is lower resolution.
+
                         projectionAllocator.push_back(*proj);
-                        projectionAllocator.back().layerFlags |= XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-                        projectionAllocator.back().views =
-                            projectionViewAllocator.at(projectionViewAllocator.size() - 1).data();
+                        // Our shader always premultiplies the alpha channel.
+                        projectionAllocator.back().layerFlags &= ~XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+                        projectionAllocator.back().views = projectionViewAllocator.back().data();
                         projectionAllocator.back().viewCount = xr::StereoView::Count;
                         layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&projectionAllocator.back()));
 
@@ -1376,7 +1364,7 @@ namespace openxr_api_layer {
 
             XrSwapchainCreateInfo createInfo{};
             XrSwapchain fullFovSwapchain[xr::StereoView::Count]{XR_NULL_HANDLE, XR_NULL_HANDLE};
-            ComPtr<ID3D11Texture2D> flatImage[xr::StereoView::Count];
+            ComPtr<ID3D11Texture2D> flatImage[xr::QuadView::Count];
             ComPtr<ID3D11Texture2D> sharpenedImage[xr::StereoView::Count];
         };
 
@@ -1433,15 +1421,16 @@ namespace openxr_api_layer {
             return true;
         }
 
-        void processViewContent(const XrCompositionLayerProjectionView& view,
-                                Swapchain& swapchain,
-                                XrCompositionLayerFlags layerFlags,
-                                uint32_t referenceViewIndex) {
+        void compositeViewContent(uint32_t viewIndex,
+                                  const XrCompositionLayerProjectionView& stereoView,
+                                  Swapchain& swapchainForStereoView,
+                                  const XrCompositionLayerProjectionView& focusView,
+                                  Swapchain& swapchainForFocusView,
+                                  XrCompositionLayerFlags layerFlags) {
             // TODO: Support D3D12.
 
-            // Grab the input texture.
-            ID3D11Texture2D* sourceImage;
-            {
+            // Grab the input textures.
+            const auto getSourceImage = [&](const XrCompositionLayerProjectionView& view, Swapchain& swapchain) {
                 uint32_t count;
                 CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(view.subImage.swapchain, 0, &count, nullptr));
                 std::vector<XrSwapchainImageD3D11KHR> images(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
@@ -1450,25 +1439,28 @@ namespace openxr_api_layer {
                     count,
                     &count,
                     reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())));
-                sourceImage = images[swapchain.lastReleasedIndex].texture;
-            }
+                return images[swapchain.lastReleasedIndex].texture;
+            };
+            ID3D11Texture2D* sourceImage = getSourceImage(stereoView, swapchainForStereoView);
+            ID3D11Texture2D* sourceFocusImage = getSourceImage(focusView, swapchainForFocusView);
 
             // Grab the output texture.
             ID3D11Texture2D* destinationImage;
             {
                 uint32_t acquiredImageIndex;
                 CHECK_XRCMD(OpenXrApi::xrAcquireSwapchainImage(
-                    swapchain.fullFovSwapchain[referenceViewIndex], nullptr, &acquiredImageIndex));
+                    swapchainForStereoView.fullFovSwapchain[viewIndex], nullptr, &acquiredImageIndex));
                 XrSwapchainImageWaitInfo waitInfo{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
                 waitInfo.timeout = 10000000000;
-                CHECK_XRCMD(OpenXrApi::xrWaitSwapchainImage(swapchain.fullFovSwapchain[referenceViewIndex], &waitInfo));
+                CHECK_XRCMD(
+                    OpenXrApi::xrWaitSwapchainImage(swapchainForStereoView.fullFovSwapchain[viewIndex], &waitInfo));
 
                 uint32_t count;
                 CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(
-                    swapchain.fullFovSwapchain[referenceViewIndex], 0, &count, nullptr));
+                    swapchainForStereoView.fullFovSwapchain[viewIndex], 0, &count, nullptr));
                 std::vector<XrSwapchainImageD3D11KHR> images(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
                 CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(
-                    swapchain.fullFovSwapchain[referenceViewIndex],
+                    swapchainForStereoView.fullFovSwapchain[viewIndex],
                     count,
                     &count,
                     reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())));
@@ -1492,12 +1484,15 @@ namespace openxr_api_layer {
             m_renderContext->ClearState();
 
             // Copy to a flat texture for sampling.
-            {
+            const auto flattenSourceImage = [&](ID3D11Texture2D* image,
+                                                const XrCompositionLayerProjectionView& view,
+                                                Swapchain& swapchain,
+                                                uint32_t startSlot) {
                 D3D11_TEXTURE2D_DESC desc{};
-                if (swapchain.flatImage[referenceViewIndex]) {
-                    swapchain.flatImage[referenceViewIndex]->GetDesc(&desc);
+                if (swapchain.flatImage[startSlot + viewIndex]) {
+                    swapchain.flatImage[startSlot + viewIndex]->GetDesc(&desc);
                 }
-                if (!swapchain.flatImage[referenceViewIndex] || desc.Width != view.subImage.imageRect.extent.width ||
+                if (!swapchain.flatImage[startSlot + viewIndex] || desc.Width != view.subImage.imageRect.extent.width ||
                     desc.Height != view.subImage.imageRect.extent.height) {
                     desc = {};
                     desc.ArraySize = 1;
@@ -1508,44 +1503,48 @@ namespace openxr_api_layer {
                     desc.SampleDesc.Count = 1;
                     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
                     CHECK_HRCMD(m_applicationDevice->CreateTexture2D(
-                        &desc, nullptr, swapchain.flatImage[referenceViewIndex].ReleaseAndGetAddressOf()));
+                        &desc, nullptr, swapchain.flatImage[startSlot + viewIndex].ReleaseAndGetAddressOf()));
                 }
-            }
-            D3D11_BOX box{};
-            box.left = view.subImage.imageRect.offset.x;
-            box.top = view.subImage.imageRect.offset.y;
-            box.right = box.left + view.subImage.imageRect.extent.width;
-            box.bottom = box.top + view.subImage.imageRect.extent.height;
-            box.back = 1;
-            m_renderContext->CopySubresourceRegion(swapchain.flatImage[referenceViewIndex].Get(),
-                                                   0,
-                                                   0,
-                                                   0,
-                                                   0,
-                                                   sourceImage,
-                                                   view.subImage.imageArrayIndex,
-                                                   &box);
+                D3D11_BOX box{};
+                box.left = view.subImage.imageRect.offset.x;
+                box.top = view.subImage.imageRect.offset.y;
+                box.right = box.left + view.subImage.imageRect.extent.width;
+                box.bottom = box.top + view.subImage.imageRect.extent.height;
+                box.back = 1;
+                m_renderContext->CopySubresourceRegion(swapchain.flatImage[startSlot + viewIndex].Get(),
+                                                       0,
+                                                       0,
+                                                       0,
+                                                       0,
+                                                       image,
+                                                       view.subImage.imageArrayIndex,
+                                                       &box);
+            };
+            // TODO: We could reduce overhead by avoiding these 2 copies and modifying sampling in our shader to
+            // consider the offset.
+            flattenSourceImage(sourceImage, stereoView, swapchainForStereoView, 0);
+            flattenSourceImage(sourceFocusImage, focusView, swapchainForFocusView, xr::StereoView::Count);
 
             // Sharpen if needed.
             if (m_sharpenFocusView) {
                 {
                     D3D11_TEXTURE2D_DESC desc{};
-                    if (swapchain.sharpenedImage[referenceViewIndex]) {
-                        swapchain.sharpenedImage[referenceViewIndex]->GetDesc(&desc);
+                    if (swapchainForFocusView.sharpenedImage[viewIndex]) {
+                        swapchainForFocusView.sharpenedImage[viewIndex]->GetDesc(&desc);
                     }
-                    if (!swapchain.sharpenedImage[referenceViewIndex] ||
-                        desc.Width != view.subImage.imageRect.extent.width ||
-                        desc.Height != view.subImage.imageRect.extent.height) {
+                    if (!swapchainForFocusView.sharpenedImage[viewIndex] ||
+                        desc.Width != focusView.subImage.imageRect.extent.width ||
+                        desc.Height != focusView.subImage.imageRect.extent.height) {
                         desc = {};
                         desc.ArraySize = 1;
-                        desc.Width = view.subImage.imageRect.extent.width;
-                        desc.Height = view.subImage.imageRect.extent.height;
+                        desc.Width = focusView.subImage.imageRect.extent.width;
+                        desc.Height = focusView.subImage.imageRect.extent.height;
                         desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
                         desc.MipLevels = 1;
                         desc.SampleDesc.Count = 1;
                         desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
                         CHECK_HRCMD(m_applicationDevice->CreateTexture2D(
-                            &desc, nullptr, swapchain.sharpenedImage[referenceViewIndex].ReleaseAndGetAddressOf()));
+                            &desc, nullptr, swapchainForFocusView.sharpenedImage[viewIndex].ReleaseAndGetAddressOf()));
                     }
                 }
 
@@ -1554,10 +1553,12 @@ namespace openxr_api_layer {
                 {
                     D3D11_SHADER_RESOURCE_VIEW_DESC desc{};
                     desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-                    desc.Format = (DXGI_FORMAT)swapchain.createInfo.format;
+                    desc.Format = (DXGI_FORMAT)swapchainForFocusView.createInfo.format;
                     desc.Texture2D.MipLevels = 1;
                     CHECK_HRCMD(m_applicationDevice->CreateShaderResourceView(
-                        swapchain.flatImage[referenceViewIndex].Get(), &desc, srv.ReleaseAndGetAddressOf()));
+                        swapchainForFocusView.flatImage[xr::StereoView::Count + viewIndex].Get(),
+                        &desc,
+                        srv.ReleaseAndGetAddressOf()));
                 }
                 ComPtr<ID3D11UnorderedAccessView> uav;
                 {
@@ -1565,7 +1566,7 @@ namespace openxr_api_layer {
                     desc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
                     desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
                     CHECK_HRCMD(m_applicationDevice->CreateUnorderedAccessView(
-                        swapchain.sharpenedImage[referenceViewIndex].Get(), &desc, uav.ReleaseAndGetAddressOf()));
+                        swapchainForFocusView.sharpenedImage[viewIndex].Get(), &desc, uav.ReleaseAndGetAddressOf()));
                 }
 
                 // Set up the shader.
@@ -1573,10 +1574,10 @@ namespace openxr_api_layer {
                 CasSetup(sharpening.Const0,
                          sharpening.Const1,
                          std::clamp(m_sharpenFocusView, 0.f, 1.f),
-                         (AF1)view.subImage.imageRect.extent.width,
-                         (AF1)view.subImage.imageRect.extent.height,
-                         (AF1)view.subImage.imageRect.extent.width,
-                         (AF1)view.subImage.imageRect.extent.height);
+                         (AF1)focusView.subImage.imageRect.extent.width,
+                         (AF1)focusView.subImage.imageRect.extent.height,
+                         (AF1)focusView.subImage.imageRect.extent.width,
+                         (AF1)focusView.subImage.imageRect.extent.height);
                 {
                     D3D11_MAPPED_SUBRESOURCE mappedResources;
                     CHECK_HRCMD(m_renderContext->Map(
@@ -1592,10 +1593,10 @@ namespace openxr_api_layer {
 
                 // This value is the image region dim that each thread group of the CAS shader operates on
                 static const int threadGroupWorkRegionDim = 16;
-                int dispatchX =
-                    (view.subImage.imageRect.extent.width + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
-                int dispatchY =
-                    (view.subImage.imageRect.extent.height + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+                int dispatchX = (focusView.subImage.imageRect.extent.width + (threadGroupWorkRegionDim - 1)) /
+                                threadGroupWorkRegionDim;
+                int dispatchY = (focusView.subImage.imageRect.extent.height + (threadGroupWorkRegionDim - 1)) /
+                                threadGroupWorkRegionDim;
                 m_renderContext->Dispatch((UINT)dispatchX, (UINT)dispatchY, 1);
 
                 // Unbind the resources used below to avoid D3D validation errors.
@@ -1604,42 +1605,49 @@ namespace openxr_api_layer {
             }
 
             // Create ephemeral SRV/RTV.
-            ComPtr<ID3D11ShaderResourceView> srv;
+            ComPtr<ID3D11ShaderResourceView> srvForStereoView;
             {
                 D3D11_SHADER_RESOURCE_VIEW_DESC desc{};
                 desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-                desc.Format =
-                    m_sharpenFocusView ? DXGI_FORMAT_R16G16B16A16_FLOAT : (DXGI_FORMAT)swapchain.createInfo.format;
+                desc.Format = (DXGI_FORMAT)swapchainForStereoView.createInfo.format;
+                desc.Texture2D.MipLevels = 1;
+                CHECK_HRCMD(
+                    m_applicationDevice->CreateShaderResourceView(swapchainForStereoView.flatImage[viewIndex].Get(),
+                                                                  &desc,
+                                                                  srvForStereoView.ReleaseAndGetAddressOf()));
+            }
+            ComPtr<ID3D11ShaderResourceView> srvForFocusView;
+            {
+                D3D11_SHADER_RESOURCE_VIEW_DESC desc{};
+                desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+                desc.Format = m_sharpenFocusView ? DXGI_FORMAT_R16G16B16A16_FLOAT
+                                                 : (DXGI_FORMAT)swapchainForFocusView.createInfo.format;
                 desc.Texture2D.MipLevels = 1;
                 CHECK_HRCMD(m_applicationDevice->CreateShaderResourceView(
-                    m_sharpenFocusView ? swapchain.sharpenedImage[referenceViewIndex].Get()
-                                       : swapchain.flatImage[referenceViewIndex].Get(),
+                    m_sharpenFocusView ? swapchainForFocusView.sharpenedImage[viewIndex].Get()
+                                       : swapchainForFocusView.flatImage[xr::StereoView::Count + viewIndex].Get(),
                     &desc,
-                    srv.ReleaseAndGetAddressOf()));
+                    srvForFocusView.ReleaseAndGetAddressOf()));
             }
-
             ComPtr<ID3D11RenderTargetView> rtv;
             {
                 D3D11_RENDER_TARGET_VIEW_DESC desc{};
                 desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-                desc.Format = (DXGI_FORMAT)swapchain.createInfo.format;
+                desc.Format = (DXGI_FORMAT)swapchainForStereoView.createInfo.format;
                 CHECK_HRCMD(
                     m_applicationDevice->CreateRenderTargetView(destinationImage, &desc, rtv.ReleaseAndGetAddressOf()));
             }
-
-            // Clear the destination.
-            const float transparent[] = {0, 0, 0, 0};
-            m_renderContext->ClearRenderTargetView(rtv.Get(), transparent);
 
             // Compute the projection.
             ProjectionVSConstants projection;
             {
                 const DirectX::XMMATRIX baseLayerViewProjection =
-                    ComposeProjectionMatrix(m_cachedEyeFov[referenceViewIndex], NearFar{0.1f, 20.f});
-                const DirectX::XMMATRIX layerViewProjection = ComposeProjectionMatrix(view.fov, NearFar{0.1f, 20.f});
+                    ComposeProjectionMatrix(m_cachedEyeFov[viewIndex], NearFar{0.1f, 20.f});
+                const DirectX::XMMATRIX layerViewProjection =
+                    ComposeProjectionMatrix(focusView.fov, NearFar{0.1f, 20.f});
 
                 DirectX::XMStoreFloat4x4(
-                    &projection.Projection,
+                    &projection.focusProjection,
                     DirectX::XMMatrixTranspose(DirectX::XMMatrixInverse(nullptr, baseLayerViewProjection) *
                                                layerViewProjection));
             }
@@ -1654,6 +1662,7 @@ namespace openxr_api_layer {
             ProjectionPSConstants drawing{};
             drawing.smoothingArea = m_smoothenFocusViewEdges;
             drawing.isUnpremultipliedAlpha = layerFlags & XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+            drawing.debugFocusView = m_debugFocusView;
             {
                 D3D11_MAPPED_SUBRESOURCE mappedResources;
                 CHECK_HRCMD(m_renderContext->Map(
@@ -1675,14 +1684,16 @@ namespace openxr_api_layer {
             m_renderContext->VSSetShader(m_projectionVS.Get(), nullptr, 0);
             m_renderContext->PSSetConstantBuffers(0, 1, m_projectionPSConstants.GetAddressOf());
             m_renderContext->PSSetSamplers(0, 1, m_linearClampSampler.GetAddressOf());
-            m_renderContext->PSSetShaderResources(0, 1, srv.GetAddressOf());
+            ID3D11ShaderResourceView* srvs[] = {srvForStereoView.Get(), srvForFocusView.Get()};
+            m_renderContext->PSSetShaderResources(0, 2, srvs);
             m_renderContext->PSSetShader(m_projectionPS.Get(), nullptr, 0);
             m_renderContext->Draw(3, 0);
 
             // Restore the application context state.
             m_renderContext->SwapDeviceContextState(applicationContextState.Get(), nullptr);
 
-            CHECK_XRCMD(OpenXrApi::xrReleaseSwapchainImage(swapchain.fullFovSwapchain[referenceViewIndex], nullptr));
+            CHECK_XRCMD(
+                OpenXrApi::xrReleaseSwapchainImage(swapchainForStereoView.fullFovSwapchain[viewIndex], nullptr));
         }
 
         void initializeCompositionResources(ID3D11Device* device) {
@@ -1715,8 +1726,7 @@ namespace openxr_api_layer {
                 CHECK_HRCMD(context->QueryInterface(m_renderContext.ReleaseAndGetAddressOf()));
             }
             {
-                D3D11_SAMPLER_DESC desc;
-                ZeroMemory(&desc, sizeof(desc));
+                D3D11_SAMPLER_DESC desc{};
                 desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
                 desc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
                 desc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -1727,8 +1737,7 @@ namespace openxr_api_layer {
                 CHECK_HRCMD(device->CreateSamplerState(&desc, m_linearClampSampler.ReleaseAndGetAddressOf()));
             }
             {
-                D3D11_RASTERIZER_DESC desc;
-                ZeroMemory(&desc, sizeof(desc));
+                D3D11_RASTERIZER_DESC desc{};
                 desc.FillMode = D3D11_FILL_SOLID;
                 desc.CullMode = D3D11_CULL_NONE;
                 desc.FrontCounterClockwise = TRUE;
@@ -2085,7 +2094,6 @@ namespace openxr_api_layer {
         bool m_useQuadViews{false};
         bool m_requestedFoveatedRendering{false};
         bool m_loggedResolution{false};
-        bool m_isFovMutable{false};
         bool m_isEyeTrackingAvailable{false};
 
         float m_peripheralPixelDensity{0.4f};

@@ -25,10 +25,12 @@
 cbuffer ConstantBuffer : register(b0) {
     float smoothingArea;
     bool isUnpremultipliedAlpha;
+    bool debugFocusView;
 };
 
 SamplerState sourceSampler : register(s0);
-Texture2D sourceTexture : register(t0);
+Texture2D sourceStereoTexture : register(t0);
+Texture2D sourceFocusTexture : register(t1);
 
 float4 premultiplyAlpha(float4 color) {
     return float4(color.rgb * color.a, color.a);
@@ -42,34 +44,40 @@ float4 unpremultiplyAlpha(float4 color) {
     }
 }
 
-float4 main(in float4 position : SV_POSITION, in float3 projectedCoord : PROJ_COORD) : SV_TARGET {
-    float2 layerProjectedCoordNdc = projectedCoord.xy / projectedCoord.z;
+float4 main(in float4 position : SV_POSITION, in float2 texcoord : PROJ_COORD0, in float3 projectedFocusCoord : PROJ_COORD1) : SV_TARGET {
+    // Convert to texcoord and pick the pixel from each layer.
+    float4 color0 = sourceStereoTexture.Sample(sourceSampler, texcoord);
 
-    // Discard the pixels outside the layer.
-    if (any(abs(layerProjectedCoordNdc) > 1)) {
-        discard;
-    }
-
-    // Convert to texcoord and pick the pixel from the layer.
-    float2 layerTexCoord = layerProjectedCoordNdc * float2(0.5f, -0.5f) + 0.5f;
-    float4 color = sourceTexture.Sample(sourceSampler, layerTexCoord);
+    float2 layer1ProjectedCoordNdc = projectedFocusCoord.xy / projectedFocusCoord.z;
+    float2 layer1TexCoord = layer1ProjectedCoordNdc * float2(0.5f, -0.5f) + 0.5f;
+    // For pixels outside of the focus view, the sampler will give us a fully transparent pixel.
+    float4 color1 = sourceFocusTexture.Sample(sourceSampler, layer1TexCoord);
 
     if (!isUnpremultipliedAlpha) {
-        color = unpremultiplyAlpha(color);
+        color0 = unpremultiplyAlpha(color0);
+        color1 = unpremultiplyAlpha(color1);
     }
 
     // Do a smooth transition with alpha-blending around the edges.
+    float isInside = all(abs(layer1ProjectedCoordNdc) < 1);
     if (smoothingArea) {
-        float2 s = smoothstep(float2(0, 0), float2(smoothingArea, smoothingArea), layerTexCoord) -
-                   smoothstep(float2(1, 1) - float2(smoothingArea, smoothingArea), float2(1, 1), layerTexCoord);
-        color.a = max(0.5, s.x * s.y);
+        float2 s = smoothstep(float2(0, 0), float2(smoothingArea, smoothingArea), layer1TexCoord) -
+                   smoothstep(float2(1, 1) - float2(smoothingArea, smoothingArea), float2(1, 1), layer1TexCoord);
+        color1.a = isInside * max(0.5, s.x * s.y);
     } else {
-        color.a = 1;
+        color1.a = isInside;
     }
 
-    if (!isUnpremultipliedAlpha) {
-        color = premultiplyAlpha(color);
+    color0 = premultiplyAlpha(color0);
+    color1 = premultiplyAlpha(color1);
+
+    // Blend the two pixels.
+    float4 color;
+    if (!debugFocusView) {
+        color = color1 + color0 * (1 - color1.a);
+    } else {
+        color = color1;
     }
 
-    return color;
+    return float4(color.rgb, 1);
 }
