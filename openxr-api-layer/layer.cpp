@@ -663,6 +663,8 @@ namespace openxr_api_layer {
                               TLXArg(viewLocateInfo->space, "Space"),
                               TLArg(viewCapacityInput, "ViewCapacityInput"));
 
+            // TODO: Conformance: viewConfigurationType must match the session.
+
             XrResult result = XR_ERROR_RUNTIME_FAILURE;
             if (viewLocateInfo->viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
                 if (m_useQuadViews) {
@@ -1331,6 +1333,8 @@ namespace openxr_api_layer {
                               TLArg(xr::ToCString(visibilityMaskType), "VisibilityMaskType"),
                               TLArg(visibilityMask->vertexCapacityInput, "VertexCapacityInput"),
                               TLArg(visibilityMask->indexCapacityInput, "IndexCapacityInput"));
+
+            // TODO: Conformance: viewConfigurationType must match the session.
 
             XrResult result = XR_ERROR_RUNTIME_FAILURE;
             if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO &&
