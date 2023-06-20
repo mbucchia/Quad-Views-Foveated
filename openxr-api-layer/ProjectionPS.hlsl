@@ -24,6 +24,7 @@
 
 cbuffer ConstantBuffer : register(b0) {
     float smoothingArea;
+    bool ignoreAlpha;
     bool isUnpremultipliedAlpha;
     bool debugFocusView;
 };
@@ -53,6 +54,10 @@ float4 main(in float4 position : SV_POSITION, in float2 texcoord : PROJ_COORD0, 
     // For pixels outside of the focus view, the sampler will give us a fully transparent pixel.
     float4 color1 = sourceFocusTexture.Sample(sourceSampler, layer1TexCoord);
 
+    if (ignoreAlpha) {
+        color0.a = color1.a = 1;
+    }
+
     if (!isUnpremultipliedAlpha) {
         color0 = unpremultiplyAlpha(color0);
         color1 = unpremultiplyAlpha(color1);
@@ -79,5 +84,5 @@ float4 main(in float4 position : SV_POSITION, in float2 texcoord : PROJ_COORD0, 
         color = color1;
     }
 
-    return float4(color.rgb, 1);
+    return float4(color.rgb, color0.a);
 }

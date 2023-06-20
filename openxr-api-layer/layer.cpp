@@ -57,6 +57,7 @@ namespace openxr_api_layer {
 
     struct ProjectionPSConstants {
         alignas(4) float smoothingArea;
+        alignas(4) bool ignoreAlpha;
         alignas(4) bool isUnpremultipliedAlpha;
         alignas(4) bool debugFocusView;
     };
@@ -1062,13 +1063,12 @@ namespace openxr_api_layer {
                                 TraceLoggingWrite(
                                     g_traceProvider,
                                     "xrEndFrame_View",
-                                    TLArg(viewIndex + i, "ViewIndex"),
-                                    TLXArg(proj->views[viewIndex + i].subImage.swapchain, "Swapchain"),
-                                    TLArg(proj->views[viewIndex + i].subImage.imageArrayIndex, "ImageArrayIndex"),
-                                    TLArg(xr::ToString(proj->views[viewIndex + i].subImage.imageRect).c_str(),
-                                          "ImageRect"),
-                                    TLArg(xr::ToString(proj->views[viewIndex + i].pose).c_str(), "Pose"),
-                                    TLArg(xr::ToString(proj->views[viewIndex + i].fov).c_str(), "Fov"));
+                                    TLArg(i, "ViewIndex"),
+                                    TLXArg(proj->views[i].subImage.swapchain, "Swapchain"),
+                                    TLArg(proj->views[i].subImage.imageArrayIndex, "ImageArrayIndex"),
+                                    TLArg(xr::ToString(proj->views[i].subImage.imageRect).c_str(), "ImageRect"),
+                                    TLArg(xr::ToString(proj->views[i].pose).c_str(), "Pose"),
+                                    TLArg(xr::ToString(proj->views[i].fov).c_str(), "Fov"));
                             }
 
                             const uint32_t focusViewIndex = viewIndex + xr::StereoView::Count;
@@ -1675,6 +1675,7 @@ namespace openxr_api_layer {
 
             ProjectionPSConstants drawing{};
             drawing.smoothingArea = m_smoothenFocusViewEdges;
+            drawing.ignoreAlpha = ~(layerFlags & XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT);
             drawing.isUnpremultipliedAlpha = layerFlags & XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
             drawing.debugFocusView = m_debugFocusView;
             {
