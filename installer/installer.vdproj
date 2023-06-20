@@ -27,6 +27,12 @@
         }
         "Entry"
         {
+        "MsmKey" = "8:_18EF797DC23F476CAD8AA197CFD110BE"
+        "OwnerKey" = "8:_UNDEFINED"
+        "MsmSig" = "8:_UNDEFINED"
+        }
+        "Entry"
+        {
         "MsmKey" = "8:_315BC6BD0026495CAD1357DC2E7719DF"
         "OwnerKey" = "8:_UNDEFINED"
         "MsmSig" = "8:_UNDEFINED"
@@ -51,8 +57,26 @@
         }
         "Entry"
         {
+        "MsmKey" = "8:_B5EF92BE5FF55374A2312CF5192F89B3"
+        "OwnerKey" = "8:_18EF797DC23F476CAD8AA197CFD110BE"
+        "MsmSig" = "8:_UNDEFINED"
+        }
+        "Entry"
+        {
         "MsmKey" = "8:_C8CD7BA388EF49ECB9F1789F0762C25D"
         "OwnerKey" = "8:_UNDEFINED"
+        "MsmSig" = "8:_UNDEFINED"
+        }
+        "Entry"
+        {
+        "MsmKey" = "8:_UNDEFINED"
+        "OwnerKey" = "8:_B5EF92BE5FF55374A2312CF5192F89B3"
+        "MsmSig" = "8:_UNDEFINED"
+        }
+        "Entry"
+        {
+        "MsmKey" = "8:_UNDEFINED"
+        "OwnerKey" = "8:_18EF797DC23F476CAD8AA197CFD110BE"
         "MsmSig" = "8:_UNDEFINED"
         }
     }
@@ -127,6 +151,21 @@
     {
         "CustomAction"
         {
+            "{4AA51A2D-7D85-4A59-BA75-B0809FC8B380}:_2DEE0F064BE44002BC9C018A24544D82"
+            {
+            "Name" = "8:Primary output from CustomSetup (Active)"
+            "Condition" = "8:"
+            "Object" = "8:_18EF797DC23F476CAD8AA197CFD110BE"
+            "FileType" = "3:1"
+            "InstallAction" = "3:1"
+            "Arguments" = "8:"
+            "EntryPoint" = "8:"
+            "Sequence" = "3:1"
+            "Identifier" = "8:_DEA7E154_26D4_4F24_83D3_F1696A9307BC"
+            "InstallerClass" = "11:TRUE"
+            "CustomActionData" = "8:"
+            "Run64Bit" = "11:TRUE"
+            }
         }
         "DefaultFeature"
         {
@@ -138,6 +177,14 @@
         {
             "LaunchCondition"
             {
+                "{A06ECF26-33A3-4562-8140-9B0E340D4F24}:_27014C517A9840DDA894216794AE0E7C"
+                {
+                "Name" = "8:.NET Framework"
+                "Message" = "8:[VSDNETMSG]"
+                "FrameworkVersion" = "8:.NETFramework,Version=v4.7.2"
+                "AllowLaterVersions" = "11:FALSE"
+                "InstallUrl" = "8:http://go.microsoft.com/fwlink/?LinkId=863262"
+                }
             }
         }
         "File"
@@ -262,6 +309,37 @@
             "IsDependency" = "11:FALSE"
             "IsolateTo" = "8:"
             }
+            "{9F6F8455-1EF1-4B85-886A-4223BCC8E7F7}:_B5EF92BE5FF55374A2312CF5192F89B3"
+            {
+            "AssemblyRegister" = "3:1"
+            "AssemblyIsInGAC" = "11:FALSE"
+            "AssemblyAsmDisplayName" = "8:System.Net.Http, Version=4.2.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+                "ScatterAssemblies"
+                {
+                    "_B5EF92BE5FF55374A2312CF5192F89B3"
+                    {
+                    "Name" = "8:System.Net.Http.dll"
+                    "Attributes" = "3:512"
+                    }
+                }
+            "SourcePath" = "8:System.Net.Http.dll"
+            "TargetName" = "8:"
+            "Tag" = "8:"
+            "Folder" = "8:_505DF0FD526F4594B101F5A5B0F2DC83"
+            "Condition" = "8:"
+            "Transitive" = "11:FALSE"
+            "Vital" = "11:TRUE"
+            "ReadOnly" = "11:FALSE"
+            "Hidden" = "11:FALSE"
+            "System" = "11:FALSE"
+            "Permanent" = "11:FALSE"
+            "SharedLegacy" = "11:FALSE"
+            "PackageAs" = "3:1"
+            "Register" = "3:1"
+            "Exclude" = "11:FALSE"
+            "IsDependency" = "11:TRUE"
+            "IsolateTo" = "8:"
+            }
             "{1FB2D0AE-D3B9-43D4-B9DD-F88EC61E35DE}:_C8CD7BA388EF49ECB9F1789F0762C25D"
             {
             "SourcePath" = "8:EULA.rtf"
@@ -338,15 +416,15 @@
         {
         "Name" = "8:Microsoft Visual Studio"
         "ProductName" = "8:OpenXR-Meta-Foveated"
-        "ProductCode" = "8:{5D4C5A26-D211-4FAA-83F7-A77B8E060F9F}"
-        "PackageCode" = "8:{4B2147DF-B7AD-4218-A316-4244A8609443}"
+        "ProductCode" = "8:{3C07053B-FE55-4E2C-B4A6-3BB8F3E8753E}"
+        "PackageCode" = "8:{82E95FA2-C0A0-454B-BE1B-F1A2FD5B47E0}"
         "UpgradeCode" = "8:{1685CBAF-3515-4983-8944-D9D95A631F4C}"
         "AspNetVersion" = "8:2.0.50727.0"
         "RestartWWWService" = "11:FALSE"
         "RemovePreviousVersions" = "11:FALSE"
         "DetectNewerInstalledVersion" = "11:TRUE"
         "InstallAllUsers" = "11:TRUE"
-        "ProductVersion" = "8:0.1.0"
+        "ProductVersion" = "8:1.0.0"
         "Manufacturer" = "8:Matthieu Bucchianeri"
         "ARPHELPTELEPHONE" = "8:"
         "ARPHELPLINK" = "8:https://mbucchia.github.io/Meta-Foveated"
@@ -1025,6 +1103,34 @@
         }
         "ProjectOutput"
         {
+            "{5259A561-127C-4D43-A0A1-72F10C7B3BF8}:_18EF797DC23F476CAD8AA197CFD110BE"
+            {
+            "SourcePath" = "8:..\\CustomSetup\\obj\\Release\\CustomSetup.dll"
+            "TargetName" = "8:"
+            "Tag" = "8:"
+            "Folder" = "8:_505DF0FD526F4594B101F5A5B0F2DC83"
+            "Condition" = "8:"
+            "Transitive" = "11:FALSE"
+            "Vital" = "11:TRUE"
+            "ReadOnly" = "11:FALSE"
+            "Hidden" = "11:FALSE"
+            "System" = "11:FALSE"
+            "Permanent" = "11:FALSE"
+            "SharedLegacy" = "11:FALSE"
+            "PackageAs" = "3:1"
+            "Register" = "3:1"
+            "Exclude" = "11:FALSE"
+            "IsDependency" = "11:FALSE"
+            "IsolateTo" = "8:"
+            "ProjectOutputGroupRegister" = "3:1"
+            "OutputConfiguration" = "8:"
+            "OutputGroupCanonicalName" = "8:Built"
+            "OutputProjectGuid" = "8:{B6C07936-A1D2-4A80-B559-B55E3F15CC97}"
+            "ShowKeyOutput" = "11:TRUE"
+                "ExcludeFilters"
+                {
+                }
+            }
             "{5259A561-127C-4D43-A0A1-72F10C7B3BF8}:_D46AA62A6061483F81DEEEA11F02467E"
             {
             "SourcePath" = "8:"
