@@ -2,7 +2,7 @@
 
 In layperson's terms:
 
-This software lets you use Eye-Tracked Foveated Rendering (sometimes referred to as Dynamic Foveated Rendering) with your Meta Quest Pro headset in Digital Combat Simulation (DCS) World when using OpenXR.
+This software lets you use Eye-Tracked Foveated Rendering (sometimes referred to as Dynamic Foveated Rendering) with your Meta Quest Pro headset in games using the [quad views rendering](https://github.com/mbucchia/Meta-Foveated/wiki/What-is-Quad-Views-rendering%3F) technique like Digital Combat Simulation (DCS) and Pavlov VR.
 
 If you are using a Varjo headset, do not use this software, but instead use [Varjo-Foveated](https://github.com/mbucchia/Varjo-Foveated/wiki).
 
@@ -21,6 +21,12 @@ Download the latest version from the [Releases page](https://github.com/mbucchia
 More information on the [the wiki](https://github.com/mbucchia/Meta-Foveated/wiki)!
 
 For troubleshooting, the log file can be found at `%LocalAppData%\XR_APILAYER_MBUCCHIA_meta_foveated\XR_APILAYER_MBUCCHIA_meta_foveated.log`.
+
+## Donate
+
+Donations are welcome and totally optional. Please use [my GitHub sponsorship page](https://github.com/sponsors/mbucchia) to make one-time or recurring donations!
+
+Thank you!
 
 ## Special thanks
 
