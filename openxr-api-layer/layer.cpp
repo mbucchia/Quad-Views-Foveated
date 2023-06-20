@@ -2130,7 +2130,7 @@ namespace openxr_api_layer {
         bool m_isEyeTrackingAvailable{false};
 
         float m_peripheralPixelDensity{0.4f};
-        float m_focusPixelDensity{1.f};
+        float m_focusPixelDensity{1.1f};
         // [0] = non-foveated, [1] = foveated
         float m_horizontalFovSection[2]{0.75f, 0.5f};
         float m_verticalFovSection[2]{0.7f, 0.5f};
@@ -2138,7 +2138,7 @@ namespace openxr_api_layer {
         bool m_preferFoveatedRendering{true};
         float m_smoothenFocusViewEdges{0.2f};
         float m_sharpenFocusView{0.7f};
-        bool m_useTurboMode{false};
+        bool m_useTurboMode{true};
 
         bool m_needComputeBaseFov{true};
         // [0] = left, [1] = right
