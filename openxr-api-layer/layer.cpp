@@ -503,7 +503,7 @@ namespace openxr_api_layer {
 
             if (XR_SUCCEEDED(result)) {
                 if (originalViewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
-                    configurationProperties->viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+                    configurationProperties->viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO;
                 }
 
                 TraceLoggingWrite(
