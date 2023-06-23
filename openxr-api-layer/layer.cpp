@@ -2240,10 +2240,69 @@ namespace openxr_api_layer {
 
 } // namespace openxr_api_layer
 
+namespace openxr_api_layer::log {
+    extern std::ofstream logStream;
+}
+
+template <typename TMethod>
+void DetourDllAttach(const char* dll, const char* target, TMethod hooked, TMethod& original) {
+    if (original) {
+        // Already hooked.
+        return;
+    }
+
+    HMODULE handle;
+    CHECK_MSG(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_PIN, dll, &handle), "Failed to get DLL handle");
+
+    DetourTransactionBegin();
+    DetourUpdateThread(GetCurrentThread());
+
+    original = (TMethod)GetProcAddress(handle, target);
+    CHECK_MSG(original, "Failed to resolve symbol");
+    DetourAttach((PVOID*)&original, hooked);
+
+    CHECK_MSG(DetourTransactionCommit() == NO_ERROR, "Detour failed");
+}
+
+bool (*original_session_InitializeSession)() = nullptr;
+bool WINAPI hooked_session_InitializeSession() {
+    openxr_api_layer::log::Log("--> session_InitializeSession()\n");
+    if (original_session_InitializeSession()) {
+        HMODULE unityOpenXRModule;
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, "UnityOpenXR.dll", &unityOpenXRModule) &&
+            unityOpenXRModule) {
+            bool (*pfnRequestEnableExtensionString)(const char* extensionString);
+            pfnRequestEnableExtensionString = reinterpret_cast<decltype(pfnRequestEnableExtensionString)>(
+                GetProcAddress(unityOpenXRModule, "unity_ext_RequestEnableExtensionString"));
+            if (pfnRequestEnableExtensionString) {
+                openxr_api_layer::log::Log("Found Unity extension activation callback\n");
+                openxr_api_layer::log::Log("Result = %d\n",
+                                           pfnRequestEnableExtensionString(XR_VARJO_QUAD_VIEWS_EXTENSION_NAME));
+            }
+        }
+        openxr_api_layer::log::Log("<-- session_InitializeSession() = true\n");
+        return true;
+    }
+    openxr_api_layer::log::Log("<-- session_InitializeSession() = false\n");
+    return false;
+}
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     switch (ul_reason_for_call) {
     case DLL_PROCESS_ATTACH:
+        DetourRestoreAfterWith();
+
         TraceLoggingRegister(openxr_api_layer::log::g_traceProvider);
+        // XXX: Unity hack.
+        {
+            HMODULE unityOpenXRModule = LoadLibrary(L"UnityOpenXR.dll");
+            if (unityOpenXRModule) {
+                DetourDllAttach("UnityOpenXR.dll",
+                                "session_InitializeSession",
+                                hooked_session_InitializeSession,
+                                original_session_InitializeSession);
+            }
+        }
         break;
 
     case DLL_PROCESS_DETACH:
