@@ -332,7 +332,9 @@ namespace openxr_api_layer {
                         }
 
                         // Make sure we have the prerequisite data to compute the resolutions we need.
-                        populateFovTables(systemId);
+                        if (!m_debugDeferPopulateFovTable) {
+                            populateFovTables(systemId);
+                        }
 
                         // Override default to specify whether foveated rendering is desired when the application does
                         // not specify.
@@ -379,9 +381,21 @@ namespace openxr_api_layer {
                                 }
                             }
 
-                            const float horizontalFov = (-m_cachedEyeFov[referenceFovIndex].angleLeft +
-                                                         m_cachedEyeFov[referenceFovIndex].angleRight);
-                            const float newWidth = basePixelDensity * pixelDensityMultiplier * horizontalFov;
+                            float newWidth;
+                            if (!m_debugDeferPopulateFovTable) {
+                                const float horizontalFov = (-m_cachedEyeFov[referenceFovIndex].angleLeft +
+                                                             m_cachedEyeFov[referenceFovIndex].angleRight);
+                                newWidth = basePixelDensity * pixelDensityMultiplier * horizontalFov;
+                            } else {
+                                if (i < xr::StereoView::Count) {
+                                    newWidth = pixelDensityMultiplier *
+                                               stereoViews[i % xr::StereoView::Count].recommendedImageRectWidth;
+                                } else {
+                                    newWidth = pixelDensityMultiplier *
+                                               m_horizontalFovSection[foveatedRenderingActive ? 1 : 0] *
+                                               stereoViews[i % xr::StereoView::Count].recommendedImageRectWidth;
+                                }
+                            }
                             const float ratio =
                                 (float)stereoViews[i % xr::StereoView::Count].recommendedImageRectHeight /
                                 stereoViews[i % xr::StereoView::Count].recommendedImageRectWidth;
@@ -544,6 +558,8 @@ namespace openxr_api_layer {
 
             if (XR_SUCCEEDED(result)) {
                 TraceLoggingWrite(g_traceProvider, "xrCreateSession", TLXArg(*session, "Session"));
+
+                m_systemId = createInfo->systemId;
             }
 
             return result;
@@ -617,6 +633,9 @@ namespace openxr_api_layer {
             const XrResult result = OpenXrApi::xrBeginSession(session, &chainBeginInfo);
 
             if (XR_SUCCEEDED(result)) {
+                // Make sure we have the prerequisite data to compute the views in subsequent calls.
+                populateFovTables(m_systemId, session);
+
                 if (m_isEyeTrackingAvailable) {
                     if (!m_debugSimulateTracking) {
                         XrEyeTrackerCreateInfoFB createInfo{XR_TYPE_EYE_TRACKER_CREATE_INFO_FB};
@@ -1810,12 +1829,12 @@ namespace openxr_api_layer {
             }
         }
 
-        void populateFovTables(XrSystemId systemId) {
+        void populateFovTables(XrSystemId systemId, XrSession session = XR_NULL_HANDLE) {
             if (!m_needComputeBaseFov) {
                 return;
             }
 
-            cacheStereoView(systemId);
+            cacheStereoView(systemId, session);
 
             XrView view[xr::StereoView::Count]{{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
             XrVector2f projectedGaze[xr::StereoView::Count]{{}, {}};
@@ -1878,23 +1897,56 @@ namespace openxr_api_layer {
             m_needComputeBaseFov = false;
         }
 
-        void cacheStereoView(XrSystemId systemId) {
-            // Create an ephemeral session to query the information we need.
-            XrGraphicsRequirementsD3D11KHR graphicsRequirements{XR_TYPE_GRAPHICS_REQUIREMENTS_D3D11_KHR};
-            CHECK_XRCMD(OpenXrApi::xrGetD3D11GraphicsRequirementsKHR(GetXrInstance(), systemId, &graphicsRequirements));
+        void cacheStereoView(XrSystemId systemId, XrSession session = XR_NULL_HANDLE) {
+            bool needCleanupSession = false;
+            if (session == XR_NULL_HANDLE) {
+                // Create an ephemeral session to query the information we need.
+                XrGraphicsRequirementsD3D11KHR graphicsRequirements{XR_TYPE_GRAPHICS_REQUIREMENTS_D3D11_KHR};
+                CHECK_XRCMD(
+                    OpenXrApi::xrGetD3D11GraphicsRequirementsKHR(GetXrInstance(), systemId, &graphicsRequirements));
 
-            std::shared_ptr<graphics::IGraphicsDevice> graphicsDevice =
-                graphics::internal::createD3D11CompositionDevice(graphicsRequirements.adapterLuid);
+                std::shared_ptr<graphics::IGraphicsDevice> graphicsDevice =
+                    graphics::internal::createD3D11CompositionDevice(graphicsRequirements.adapterLuid);
 
-            XrGraphicsBindingD3D11KHR graphicsBindings{XR_TYPE_GRAPHICS_BINDING_D3D11_KHR};
-            graphicsBindings.device = graphicsDevice->getNativeDevice<graphics::D3D11>();
+                XrGraphicsBindingD3D11KHR graphicsBindings{XR_TYPE_GRAPHICS_BINDING_D3D11_KHR};
+                graphicsBindings.device = graphicsDevice->getNativeDevice<graphics::D3D11>();
 
-            XrSessionCreateInfo sessionCreateInfo{XR_TYPE_SESSION_CREATE_INFO};
-            sessionCreateInfo.systemId = systemId;
-            sessionCreateInfo.next = &graphicsBindings;
+                XrSessionCreateInfo sessionCreateInfo{XR_TYPE_SESSION_CREATE_INFO};
+                sessionCreateInfo.systemId = systemId;
+                sessionCreateInfo.next = &graphicsBindings;
 
-            XrSession session;
-            CHECK_XRCMD(OpenXrApi::xrCreateSession(GetXrInstance(), &sessionCreateInfo, &session));
+                CHECK_XRCMD(OpenXrApi::xrCreateSession(GetXrInstance(), &sessionCreateInfo, &session));
+
+                // Wait for the session to be ready.
+                {
+                    while (true) {
+                        XrEventDataBuffer event{XR_TYPE_EVENT_DATA_BUFFER};
+                        const XrResult result = OpenXrApi::xrPollEvent(GetXrInstance(), &event);
+                        if (result == XR_SUCCESS) {
+                            if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
+                                const XrEventDataSessionStateChanged& sessionEvent =
+                                    *reinterpret_cast<XrEventDataSessionStateChanged*>(&event);
+
+                                if (sessionEvent.state == XR_SESSION_STATE_READY) {
+                                    break;
+                                }
+                            }
+                        }
+                        CHECK_XRCMD(result);
+
+                        // TODO: Need some sort of timeout.
+                        if (result == XR_EVENT_UNAVAILABLE) {
+                            std::this_thread::sleep_for(100ms);
+                        }
+                    }
+                }
+
+                XrSessionBeginInfo beginSessionInfo{XR_TYPE_SESSION_BEGIN_INFO};
+                beginSessionInfo.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+                CHECK_XRCMD(OpenXrApi::xrBeginSession(session, &beginSessionInfo));
+
+                needCleanupSession = true;
+            }
 
             XrReferenceSpaceCreateInfo spaceCreateInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
             spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
@@ -1902,34 +1954,6 @@ namespace openxr_api_layer {
 
             XrSpace viewSpace;
             CHECK_XRCMD(OpenXrApi::xrCreateReferenceSpace(session, &spaceCreateInfo, &viewSpace));
-
-            // Wait for the session to be ready.
-            {
-                while (true) {
-                    XrEventDataBuffer event{XR_TYPE_EVENT_DATA_BUFFER};
-                    const XrResult result = OpenXrApi::xrPollEvent(GetXrInstance(), &event);
-                    if (result == XR_SUCCESS) {
-                        if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
-                            const XrEventDataSessionStateChanged& sessionEvent =
-                                *reinterpret_cast<XrEventDataSessionStateChanged*>(&event);
-
-                            if (sessionEvent.state == XR_SESSION_STATE_READY) {
-                                break;
-                            }
-                        }
-                    }
-                    CHECK_XRCMD(result);
-
-                    // TODO: Need some sort of timeout.
-                    if (result == XR_EVENT_UNAVAILABLE) {
-                        std::this_thread::sleep_for(100ms);
-                    }
-                }
-            }
-
-            XrSessionBeginInfo beginSessionInfo{XR_TYPE_SESSION_BEGIN_INFO};
-            beginSessionInfo.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-            CHECK_XRCMD(OpenXrApi::xrBeginSession(session, &beginSessionInfo));
 
             XrViewLocateInfo viewLocateInfo{XR_TYPE_VIEW_LOCATE_INFO};
             viewLocateInfo.space = viewSpace;
@@ -1952,16 +1976,18 @@ namespace openxr_api_layer {
                 }
             }
 
-            CHECK_XRCMD(OpenXrApi::xrDestroySession(session));
+            if (needCleanupSession) {
+                CHECK_XRCMD(OpenXrApi::xrDestroySession(session));
 
-            // Purge events for this session.
-            // TODO: This might steal legitimate events from the runtime.
-            {
-                while (true) {
-                    XrEventDataBuffer event{XR_TYPE_EVENT_DATA_BUFFER};
-                    const XrResult result = OpenXrApi::xrPollEvent(GetXrInstance(), &event);
-                    if (result == XR_EVENT_UNAVAILABLE) {
-                        break;
+                // Purge events for this session.
+                // TODO: This might steal legitimate events from the runtime.
+                {
+                    while (true) {
+                        XrEventDataBuffer event{XR_TYPE_EVENT_DATA_BUFFER};
+                        const XrResult result = OpenXrApi::xrPollEvent(GetXrInstance(), &event);
+                        if (result == XR_EVENT_UNAVAILABLE) {
+                            break;
+                        }
                     }
                 }
             }
@@ -2105,6 +2131,9 @@ namespace openxr_api_layer {
                     } else if (name == "debug_force_no_foveated") {
                         m_debugForceNoFoveated = std::stoi(value);
                         parsed = true;
+                    } else if (name == "debug_defer_populate_fov_table") {
+                        m_debugDeferPopulateFovTable = std::stoi(value);
+                        parsed = true;
                     } else if (name == "debug_keys") {
                         m_debugKeys = std::stoi(value);
                         parsed = true;
@@ -2128,6 +2157,8 @@ namespace openxr_api_layer {
         bool m_requestedFoveatedRendering{false};
         bool m_loggedResolution{false};
         bool m_isEyeTrackingAvailable{false};
+
+        XrSystemId m_systemId{XR_NULL_SYSTEM_ID};
 
         float m_peripheralPixelDensity{0.4f};
         float m_focusPixelDensity{1.1f};
@@ -2192,6 +2223,7 @@ namespace openxr_api_layer {
         bool m_debugFocusView{false};
         bool m_debugSimulateTracking{false};
         bool m_debugForceNoFoveated{false};
+        bool m_debugDeferPopulateFovTable{false};
         bool m_debugKeys{false};
 
         std::shared_ptr<graphics::IGraphicsTimer> m_compositionTimer[3];
