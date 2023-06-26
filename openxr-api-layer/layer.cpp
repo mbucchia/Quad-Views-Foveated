@@ -141,6 +141,7 @@ namespace openxr_api_layer {
 
             XrInstanceProperties instanceProperties = {XR_TYPE_INSTANCE_PROPERTIES};
             CHECK_XRCMD(OpenXrApi::xrGetInstanceProperties(GetXrInstance(), &instanceProperties));
+            m_runtimeName = instanceProperties.runtimeName;
             const auto runtimeName = fmt::format("{} {}.{}.{}",
                                                  instanceProperties.runtimeName,
                                                  XR_VERSION_MAJOR(instanceProperties.runtimeVersion),
@@ -2327,11 +2328,12 @@ namespace openxr_api_layer {
             }
 
             if (configFile.is_open()) {
+                bool active = true;
                 unsigned int lineNumber = 0;
                 std::string line;
                 while (std::getline(configFile, line)) {
                     lineNumber++;
-                    ParseConfigurationStatement(line, lineNumber);
+                    active = ParseConfigurationStatement(line, lineNumber, active);
                 }
                 configFile.close();
             } else {
@@ -2339,8 +2341,27 @@ namespace openxr_api_layer {
             }
         }
 
-        void ParseConfigurationStatement(const std::string& line, unsigned int lineNumber) {
+        bool ParseConfigurationStatement(const std::string& line, unsigned int lineNumber, bool active) {
             try {
+                if (line.empty()) {
+                    return active;
+                }
+
+                // Handle comments.
+                if ((line[0] == '/' && line[1] == '/') || line[0] == '#') {
+                    return active;
+                }
+
+                // Toggle active section.
+                if (line[0] == '[' && line[line.size() - 1] == ']') {
+                    return m_runtimeName.find(line.substr(1, line.size() - 2)) != std::string::npos;
+                }
+
+                // Skip sections not for the current runtime.
+                if (!active) {
+                    return active;
+                }
+
                 const auto offset = line.find('=');
                 if (offset != std::string::npos) {
                     const std::string name = line.substr(0, offset);
@@ -2408,12 +2429,15 @@ namespace openxr_api_layer {
             } catch (...) {
                 Log("L%u: Parsing error\n", lineNumber);
             }
+
+            return active;
         }
 
         bool m_bypassApiLayer{false};
         bool m_useQuadViews{false};
         bool m_requestedFoveatedRendering{false};
         bool m_requestedDepthSubmission{false};
+        std::string m_runtimeName;
         bool m_loggedResolution{false};
         bool m_isEyeTrackingAvailable{false};
         bool m_useEyeTrackingFB{true};
