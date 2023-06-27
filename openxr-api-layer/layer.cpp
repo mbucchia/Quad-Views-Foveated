@@ -168,6 +168,8 @@ namespace openxr_api_layer {
                               TLArg(m_horizontalFovSection[1], "FoveatedHorizontalSection"),
                               TLArg(m_verticalFovSection[1], "FoveatedVerticalSection"),
                               TLArg(m_verticalFocusBias, "VerticalFocusBias"),
+                              TLArg(m_edgeMaxWidenAngle, "EdgeMaxWidenAngle"),
+                              TLArg(m_focusWideningDeadzone, "FocusWideningDeadzone"),
                               TLArg(m_preferFoveatedRendering, "PreferFoveatedRendering"),
                               TLArg(m_smoothenFocusViewEdges, "SmoothenEdges"),
                               TLArg(m_sharpenFocusView, "SharpenFocusView"),
@@ -347,6 +349,10 @@ namespace openxr_api_layer {
                             }
                         }
 
+                        XrExtent2Di stereoResolution = {
+                            (int32_t)stereoViews[xr::StereoView::Left].recommendedImageRectWidth,
+                            (int32_t)stereoViews[xr::StereoView::Left].recommendedImageRectHeight};
+
                         // Make sure we have the prerequisite data to compute the resolutions we need.
                         if (!m_debugDeferPopulateFovTable) {
                             populateFovTables(systemId);
@@ -397,42 +403,68 @@ namespace openxr_api_layer {
                                 }
                             }
 
-                            float newWidth;
+                            float newWidth, newHeight;
                             if (!m_debugDeferPopulateFovTable) {
                                 const float horizontalFov = (-m_cachedEyeFov[referenceFovIndex].angleLeft +
                                                              m_cachedEyeFov[referenceFovIndex].angleRight);
+                                const float verticalFov = (-m_cachedEyeFov[referenceFovIndex].angleUp +
+                                                           m_cachedEyeFov[referenceFovIndex].angleDown);
                                 newWidth = basePixelDensity * pixelDensityMultiplier * horizontalFov;
+                                newHeight = basePixelDensity * pixelDensityMultiplier * verticalFov;
                             } else {
                                 if (i < xr::StereoView::Count) {
                                     newWidth = pixelDensityMultiplier *
                                                stereoViews[i % xr::StereoView::Count].recommendedImageRectWidth;
+                                    newHeight = pixelDensityMultiplier *
+                                                stereoViews[i % xr::StereoView::Count].recommendedImageRectHeight;
                                 } else {
                                     newWidth = pixelDensityMultiplier *
                                                m_horizontalFovSection[foveatedRenderingActive ? 1 : 0] *
                                                stereoViews[i % xr::StereoView::Count].recommendedImageRectWidth;
+                                    newHeight = pixelDensityMultiplier *
+                                                m_verticalFovSection[foveatedRenderingActive ? 1 : 0] *
+                                                stereoViews[i % xr::StereoView::Count].recommendedImageRectHeight;
                                 }
                             }
-                            const float ratio =
-                                (float)stereoViews[i % xr::StereoView::Count].recommendedImageRectHeight /
-                                stereoViews[i % xr::StereoView::Count].recommendedImageRectWidth;
-                            const float newHeight = newWidth * ratio;
+                            if (m_debugKeepAspectRatio) {
+                                const float ratio =
+                                    (float)stereoViews[i % xr::StereoView::Count].recommendedImageRectHeight /
+                                    stereoViews[i % xr::StereoView::Count].recommendedImageRectWidth;
+                                newHeight = newWidth * ratio;
+                            }
 
                             views[i] = stereoViews[i % xr::StereoView::Count];
                             views[i].recommendedImageRectWidth =
-                                std::min((uint32_t)newWidth, views[i].maxImageRectWidth);
+                                std::min(AlignTo<2>((uint32_t)newWidth), views[i].maxImageRectWidth);
                             views[i].recommendedImageRectHeight =
-                                std::min((uint32_t)newHeight, views[i].maxImageRectHeight);
+                                std::min(AlignTo<2>((uint32_t)newHeight), views[i].maxImageRectHeight);
                         }
 
                         if (!m_loggedResolution) {
-                            Log("Recommended peripheral resolution: %ux%u (%.3fx density)\n",
-                                views[xr::StereoView::Left].recommendedImageRectWidth,
-                                views[xr::StereoView::Left].recommendedImageRectHeight,
-                                m_peripheralPixelDensity);
-                            Log("Recommended focus resolution: %ux%u (%.3fx density)\n",
-                                views[xr::QuadView::FocusLeft].recommendedImageRectWidth,
-                                views[xr::QuadView::FocusLeft].recommendedImageRectHeight,
-                                m_focusPixelDensity);
+                            Log(fmt::format("Recommended peripheral resolution: {}x{} ({:.3f}x density)\n",
+                                            views[xr::StereoView::Left].recommendedImageRectWidth,
+                                            views[xr::StereoView::Left].recommendedImageRectHeight,
+                                            m_peripheralPixelDensity));
+                            Log(fmt::format("Recommended focus resolution: {}x{} ({:.3f}x density)\n",
+                                            views[xr::QuadView::FocusLeft].recommendedImageRectWidth,
+                                            views[xr::QuadView::FocusLeft].recommendedImageRectHeight,
+                                            m_focusPixelDensity));
+
+                            const int32_t stereoPixelsCount =
+                                xr::StereoView::Count * stereoResolution.width * stereoResolution.height;
+                            Log(fmt::format("  Stereo pixel count was: {:L} ({}x{})\n",
+                                            stereoPixelsCount,
+                                            stereoResolution.width,
+                                            stereoResolution.height));
+                            const uint32_t quadViewsPixelsCount =
+                                xr::StereoView::Count * (views[xr::StereoView::Left].recommendedImageRectWidth *
+                                                             views[xr::StereoView::Left].recommendedImageRectHeight +
+                                                         views[xr::QuadView::FocusLeft].recommendedImageRectWidth *
+                                                             views[xr::QuadView::FocusLeft].recommendedImageRectHeight);
+                            Log(fmt::format("  Quad views pixel count is: {:L}\n", quadViewsPixelsCount));
+                            Log(fmt::format("  Savings: -{:.1f}%%\n",
+                                            100.f * (1.f - (float)quadViewsPixelsCount / stereoPixelsCount)));
+
                             m_loggedResolution = true;
                         }
                     }
@@ -827,15 +859,14 @@ namespace openxr_api_layer {
                                         // Shift FOV according to the eye gaze.
                                         // We also widen the FOV when near the edges of the headset to make sure there's
                                         // enough overlap between the two eyes.
-                                        const float MaxWidenAngle = 0.122173f; /* rad */
-                                        constexpr float Deadzone = 0.15f;
                                         const XrVector2f centerOfFov{(projectedGaze.x + 1.f) / 2.f,
                                                                      (1.f - projectedGaze.y + m_verticalFocusBias) /
                                                                          2.f};
                                         const XrVector2f v = centerOfFov - m_centerOfFov[stereoViewIndex];
                                         const float distanceFromCenter = std::sqrt(v.x * v.x + v.y * v.y);
                                         const float widenHalfAngle =
-                                            std::clamp(distanceFromCenter - Deadzone, 0.f, 0.5f) * MaxWidenAngle;
+                                            std::clamp(distanceFromCenter - m_focusWideningDeadzone, 0.f, 0.5f) *
+                                            m_edgeMaxWidenAngle;
                                         XrFovf globalFov = m_cachedEyeFov[i % xr::StereoView::Count];
                                         std::tie(views[i].fov.angleLeft, views[i].fov.angleRight) =
                                             Fov::Lerp(std::make_pair(globalFov.angleLeft, globalFov.angleRight),
@@ -2389,6 +2420,12 @@ namespace openxr_api_layer {
                     } else if (name == "vertical_focus_bias") {
                         m_verticalFocusBias = std::clamp(std::stof(value), -0.5f, 0.5f);
                         parsed = true;
+                    } else if (name == "edge_max_widen_angle") {
+                        m_edgeMaxWidenAngle = std::clamp(std::stof(value), 0.f, (float)M_PI_4);
+                        parsed = true;
+                    } else if (name == "focus_widening_deadzone") {
+                        m_focusWideningDeadzone = std::clamp(std::stof(value), 0.f, 0.5f);
+                        parsed = true;
                     } else if (name == "prefer_foveated_rendering") {
                         m_preferFoveatedRendering = std::stoi(value);
                         parsed = true;
@@ -2412,6 +2449,9 @@ namespace openxr_api_layer {
                         parsed = true;
                     } else if (name == "debug_defer_populate_fov_table") {
                         m_debugDeferPopulateFovTable = std::stoi(value);
+                        parsed = true;
+                    } else if (name == "debug_keep_aspect_ratio") {
+                        m_debugKeepAspectRatio = std::stoi(value);
                         parsed = true;
                     } else if (name == "debug_keys") {
                         m_debugKeys = std::stoi(value);
@@ -2450,6 +2490,8 @@ namespace openxr_api_layer {
         float m_horizontalFovSection[2]{0.75f, 0.5f};
         float m_verticalFovSection[2]{0.7f, 0.5f};
         float m_verticalFocusBias{0.25f};
+        float m_edgeMaxWidenAngle{0.122173f};
+        float m_focusWideningDeadzone{0.15f};
         bool m_preferFoveatedRendering{true};
         float m_smoothenFocusViewEdges{0.2f};
         float m_sharpenFocusView{0.7f};
@@ -2514,7 +2556,8 @@ namespace openxr_api_layer {
         bool m_debugFocusView{false};
         bool m_debugSimulateTracking{false};
         bool m_debugForceNoFoveated{false};
-        bool m_debugDeferPopulateFovTable{false};
+        bool m_debugDeferPopulateFovTable{true};
+        bool m_debugKeepAspectRatio{false};
         bool m_debugKeys{false};
 
         std::shared_ptr<graphics::IGraphicsTimer> m_compositionTimer[3];
