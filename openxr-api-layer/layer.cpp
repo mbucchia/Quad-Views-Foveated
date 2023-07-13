@@ -150,8 +150,10 @@ namespace openxr_api_layer {
             TraceLoggingWrite(g_traceProvider, "xrCreateInstance", TLArg(runtimeName.c_str(), "RuntimeName"));
             Log(fmt::format("Using OpenXR runtime: {}\n", runtimeName));
 
-            // Parse the configuration.
-            LoadConfiguration();
+            // Parse the configuration. Load the file shipped with the layer first, followed by the file the users may
+            // edit.
+            LoadConfiguration(dllHome / "settings.cfg");
+            LoadConfiguration(localAppData / "settings.cfg");
 
             // Platform-specific quirks.
             m_needDeferredSwapchainReleaseQuirk = runtimeName.find("Varjo") != std::string::npos;
@@ -2344,20 +2346,11 @@ namespace openxr_api_layer {
             }
         }
 
-        void LoadConfiguration() {
-            std::ifstream configFile;
-
+        void LoadConfiguration(const std::filesystem::path& configPath) {
             // Look in %LocalAppData% first, then fallback to your installation folder.
-            auto configPath = localAppData / "settings.cfg";
             Log(fmt::format("Trying to locate configuration file at '{}'...\n", configPath.string()));
+            std::ifstream configFile;
             configFile.open(configPath);
-            if (!configFile.is_open()) {
-                Log("Not found\n");
-                configPath = dllHome / "settings.cfg";
-                Log(fmt::format("Trying to locate configuration file at '{}'...\n", configPath.string()));
-                configFile.open(configPath);
-            }
-
             if (configFile.is_open()) {
                 bool active = true;
                 unsigned int lineNumber = 0;
@@ -2368,7 +2361,7 @@ namespace openxr_api_layer {
                 }
                 configFile.close();
             } else {
-                Log("No configuration was found\n");
+                Log("Not found\n");
             }
         }
 
@@ -2379,13 +2372,17 @@ namespace openxr_api_layer {
                 }
 
                 // Handle comments.
-                if ((line[0] == '/' && line[1] == '/') || line[0] == '#') {
+                if ((line[0] == '/' && line.size() > 1 && line[1] == '/') || line[0] == '#') {
                     return active;
                 }
 
                 // Toggle active section.
                 if (line[0] == '[' && line[line.size() - 1] == ']') {
-                    return m_runtimeName.find(line.substr(1, line.size() - 2)) != std::string::npos;
+                    if (line.substr(1, 4) == "app:") {
+                        return GetApplicationName().find(line.substr(5, line.size() - 6)) != std::string::npos;
+                    } else {
+                        return m_runtimeName.find(line.substr(1, line.size() - 2)) != std::string::npos;
+                    }
                 }
 
                 // Skip sections not for the current runtime.
