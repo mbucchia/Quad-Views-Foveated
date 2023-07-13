@@ -27,7 +27,7 @@
 namespace openxr_api_layer {
 
     const std::string LayerName = LAYER_NAME;
-    const std::string VersionString = "v1.0.0";
+    const std::string VersionString = "v1.0.1";
 
     // Singleton accessor.
     OpenXrApi* GetInstance();

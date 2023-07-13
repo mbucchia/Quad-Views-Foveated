@@ -38,7 +38,7 @@ namespace SetupCustomActions
             var installPath = Path.GetDirectoryName(base.Context.Parameters["AssemblyPath"]);
 
             // https://stackoverflow.com/questions/6213498/custom-installer-in-net-showing-form-behind-installer
-            var proc = Process.GetProcessesByName("msiexec").FirstOrDefault(p => p.MainWindowTitle == "OpenXR-Meta-Foveated");
+            var proc = Process.GetProcessesByName("msiexec").FirstOrDefault(p => p.MainWindowTitle == "OpenXR-Quad-Views-Foveated");
             var owner = proc != null ? new WindowWrapper(proc.MainWindowHandle) : null;
 
             // We want to add our layer at the very beginning, so that any other layer like the OpenXR Toolkit layer is following us.
@@ -47,12 +47,11 @@ namespace SetupCustomActions
             Microsoft.Win32.RegistryKey key;
             {
                 key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey("SOFTWARE\\Khronos\\OpenXR\\1\\ApiLayers\\Implicit");
-                var jsonName = "OpenXR-Meta-Foveated\\openxr-api-layer.json";
                 var jsonPath = installPath + "\\openxr-api-layer.json";
 
                 var existingValues = key.GetValueNames();
 
-                ReOrderApiLayers(key, jsonName, jsonPath);
+                ReOrderApiLayers(key, jsonPath);
 
                 // Issue the appropriate compatibility warnings.
                 foreach (var value in existingValues)
@@ -60,8 +59,8 @@ namespace SetupCustomActions
                     if (value.EndsWith("\\XR_APILAYER_MBUCCHIA_toolkit.json"))
                     {
                         MessageBox.Show(owner, "OpenXR Toolkit was detected on your system.\n\n" +
-                            "OpenXR Toolkit is not compatible with applications such as DCS World or Pavlov VR when they use quad views rendering with this tool.\n" +
-                            "Please make sure to disable OpenXR Toolkit for the applications that will use quad views rendering.",
+                            "OpenXR Toolkit is compatible with applications such as DCS World or Pavlov VR when they use quad views rendering with this tool.\n" +
+                            "However you might need to clear all prior OpenXR Toolkit settings for these applications, by using OpenXR Toolkit Safe Mode then selecting Menu -> Restore Defaults in the application.",
                             "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
                 }
@@ -73,10 +72,14 @@ namespace SetupCustomActions
                 key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey("SOFTWARE\\Khronos\\OpenXR\\1");
                 var activeRuntime = (string)key.GetValue("ActiveRuntime", "");
 
-                if (!activeRuntime.EndsWith("\\oculus_openxr_64.json"))
+                if (activeRuntime.EndsWith("\\steamxr_win64.json"))
                 {
-                    MessageBox.Show(owner, "Oculus OpenXR was not detected as your active OpenXR runtime.\n\n" +
-                        "Please make sure to set Oculus as your OpenXR runtime from the Oculus application in order to use the eye tracking capabilities of your device.",
+                    MessageBox.Show(owner, "SteamVR OpenXR was detected as your active OpenXR runtime.\n\n" +
+                        "On most devices, SteamVR does not offer eye tracking support via OpenXR.\n" +
+                        "- Meta Quest Pro users: Please make sure to set Oculus as your OpenXR runtime from the Oculus application.\n" +
+                        "- Pimax Crystal/Droolon users: Please make sure to set PimaxXR as your OpenXR runtime from the PimaxXR Control Center.\n" +
+                        "- Varjo users: Please make sure to set Varjo as your OpenXR runtime from Varjo Base's System tab.\n" +
+                        "- Vive Pro Eye users: Please make sure that the Vive Console application is installed. You do not need to change your OpenXR runtime.",
                         "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             }
@@ -94,7 +97,7 @@ namespace SetupCustomActions
             base.OnAfterInstall(savedState);
         }
 
-        private void ReOrderApiLayers(Microsoft.Win32.RegistryKey key, string jsonName, string jsonPath)
+        private void ReOrderApiLayers(Microsoft.Win32.RegistryKey key, string jsonPath)
         {
             var existingValues = key.GetValueNames();
             var entriesValues = new Dictionary<string, object>();
@@ -107,8 +110,14 @@ namespace SetupCustomActions
             key.SetValue(jsonPath, 0);
             foreach (var value in existingValues)
             {
+                // Do not re-create keys for previous versions of our layer.
+                if (value.EndsWith("OpenXR-Meta-Foveated\\openxr-api-layer.json"))
+                {
+                    continue;
+                }
+
                 // Do not re-create our own key. We did it before this loop.
-                if (value.EndsWith("\\" + jsonName))
+                if (value == jsonPath)
                 {
                     continue;
                 }

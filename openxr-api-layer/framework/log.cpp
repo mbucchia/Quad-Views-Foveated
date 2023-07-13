@@ -32,7 +32,7 @@ namespace openxr_api_layer::log {
 
     // {cbf3adcd-42b1-4c38-830c-91980af201f8}
     TRACELOGGING_DEFINE_PROVIDER(g_traceProvider,
-                                 "MetaFoveated",
+                                 "QuadViewsFoveated",
                                  (0xcbf3adcd, 0x42b1, 0x4c38, 0x83, 0x0c, 0x98, 0x98, 0x0a, 0xf2, 0x01, 0xf8));
 
     TraceLoggingActivity<g_traceProvider> g_traceActivity;
