@@ -64,12 +64,12 @@ XrResult __declspec(dllexport) XRAPI_CALL
         }
     }
 
-    localAppData = std::filesystem::path(getenv("LOCALAPPDATA")) / LayerName;
+    localAppData = std::filesystem::path(getenv("LOCALAPPDATA")) / LayerPrettyName;
     CreateDirectoryA(localAppData.string().c_str(), nullptr);
 
     // Start logging to file.
     if (!logStream.is_open()) {
-        std::string logFile = (localAppData / (LayerName + ".log")).string();
+        std::string logFile = (localAppData / (LayerPrettyName + ".log")).string();
         logStream.open(logFile, std::ios_base::ate);
     }
 
