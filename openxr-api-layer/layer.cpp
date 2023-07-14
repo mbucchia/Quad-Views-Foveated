@@ -157,6 +157,10 @@ namespace openxr_api_layer {
 
             // Platform-specific quirks.
             m_needDeferredSwapchainReleaseQuirk = runtimeName.find("Varjo") != std::string::npos;
+            if (m_needDeferredSwapchainReleaseQuirk && m_useTurboMode) {
+                Log("Denying Turbo Mode due to deferred swapchain release!\n");
+                m_useTurboMode = false;
+            }
 
             // Game-specific quirks.
             m_needFocusFovCorrectionQuirk = GetApplicationName() == "DCS World";
