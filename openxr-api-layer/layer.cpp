@@ -1553,8 +1553,26 @@ namespace openxr_api_layer {
 
         // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrPollEvent
         XrResult xrPollEvent(XrInstance instance, XrEventDataBuffer* eventData) override {
-            // TODO: Block/translate visibility mask events.
-            return OpenXrApi::xrPollEvent(instance, eventData);
+            TraceLoggingWrite(g_traceProvider, "xrPollEvent", TLXArg(instance, "Instance"));
+
+            const XrResult result = OpenXrApi::xrPollEvent(instance, eventData);
+
+            if (result == XR_SUCCESS) {
+                TraceLoggingWrite(g_traceProvider, "xrPollEvent", TLArg(xr::ToCString(eventData->type), "EventType"));
+
+                // Translate visibility mask events.
+                if (eventData->type == XR_TYPE_EVENT_DATA_VISIBILITY_MASK_CHANGED_KHR) {
+                    XrEventDataVisibilityMaskChangedKHR* event =
+                        reinterpret_cast<XrEventDataVisibilityMaskChangedKHR*>(eventData);
+                    // We will implement quad views on top of stereo. If the stereo mask changes, then it means the quad
+                    // views mask for the peripheral views changes.
+                    if (event->viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO) {
+                        event->viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO;
+                    }
+                }
+            }
+
+            return result;
         }
 
         // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrGetVisibilityMaskKHR
