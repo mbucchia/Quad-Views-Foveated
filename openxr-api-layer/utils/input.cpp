@@ -1052,41 +1052,41 @@ namespace {
         static inline std::mutex factoryMutex;
         static inline InputFrameworkFactory* factory{nullptr};
 
-        static XrResult hookCreateSession(XrInstance instance,
-                                          const XrSessionCreateInfo* createInfo,
-                                          XrSession* session) {
+        static XrResult XRAPI_CALL hookCreateSession(XrInstance instance,
+                                                     const XrSessionCreateInfo* createInfo,
+                                                     XrSession* session) {
             return factory->xrCreateSession_subst(instance, createInfo, session);
         }
 
-        static XrResult hookDestroySession(XrSession session) {
+        static XrResult XRAPI_CALL hookDestroySession(XrSession session) {
             return factory->xrDestroySession_subst(session);
         }
 
-        static XrResult hookPollEvent(XrInstance instance, XrEventDataBuffer* eventData) {
+        static XrResult XRAPI_CALL hookPollEvent(XrInstance instance, XrEventDataBuffer* eventData) {
             return factory->xrPollEvent_subst(instance, eventData);
         }
 
-        static XrResult hookSuggestInteractionProfileBindings(
+        static XrResult XRAPI_CALL hookSuggestInteractionProfileBindings(
             XrInstance instance, const XrInteractionProfileSuggestedBinding* suggestedBindings) {
             return factory->xrSuggestInteractionProfileBindings_subst(instance, suggestedBindings);
         }
 
-        static XrResult hookWaitFrame(XrSession session,
-                                      const XrFrameWaitInfo* frameWaitInfo,
-                                      XrFrameState* frameState) {
+        static XrResult XRAPI_CALL hookWaitFrame(XrSession session,
+                                                 const XrFrameWaitInfo* frameWaitInfo,
+                                                 XrFrameState* frameState) {
             return factory->xrWaitFrame_subst(session, frameWaitInfo, frameState);
         }
 
-        static XrResult hookBeginFrame(XrSession session, const XrFrameBeginInfo* frameBeginInfo) {
+        static XrResult XRAPI_CALL hookBeginFrame(XrSession session, const XrFrameBeginInfo* frameBeginInfo) {
             return factory->xrBeginFrame_subst(session, frameBeginInfo);
         }
 
-        static XrResult hookAttachSessionActionSets(XrSession session,
-                                                    const XrSessionActionSetsAttachInfo* attachInfo) {
+        static XrResult XRAPI_CALL hookAttachSessionActionSets(XrSession session,
+                                                               const XrSessionActionSetsAttachInfo* attachInfo) {
             return factory->xrAttachSessionActionSets_subst(session, attachInfo);
         }
 
-        static XrResult hookSyncActions(XrSession session, const XrActionsSyncInfo* syncInfo) {
+        static XrResult XRAPI_CALL hookSyncActions(XrSession session, const XrActionsSyncInfo* syncInfo) {
             return factory->xrSyncActions_subst(session, syncInfo);
         }
     };

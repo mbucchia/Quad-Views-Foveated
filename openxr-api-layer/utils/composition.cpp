@@ -701,7 +701,7 @@ namespace {
                                     TLArg((int64_t)m_preferredSRGBColorFormat, "PreferredSRGBColorFormat"),
                                     TLArg((int64_t)m_preferredDepthFormat, "PreferredDepthFormat"));
 
-            TraceLoggingWriteStop(local, "CompositionFramework_Create", TLXArg(this, "CompositionFramework"));
+            TraceLoggingWriteStop(local, "CompositionFramework_Create", TLPArg(this, "CompositionFramework"));
         }
 
         ~CompositionFramework() {
@@ -981,13 +981,13 @@ namespace {
         static inline std::mutex factoryMutex;
         static inline CompositionFrameworkFactory* factory{nullptr};
 
-        static XrResult hookCreateSession(XrInstance instance,
-                                          const XrSessionCreateInfo* createInfo,
-                                          XrSession* session) {
+        static XrResult XRAPI_CALL hookCreateSession(XrInstance instance,
+                                                     const XrSessionCreateInfo* createInfo,
+                                                     XrSession* session) {
             return factory->xrCreateSession_subst(instance, createInfo, session);
         }
 
-        static XrResult hookDestroySession(XrSession session) {
+        static XrResult XRAPI_CALL hookDestroySession(XrSession session) {
             return factory->xrDestroySession_subst(session);
         }
     };
