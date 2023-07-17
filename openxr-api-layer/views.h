@@ -34,50 +34,33 @@ namespace xr {
 
     namespace math {
 
-        namespace Fov {
+        static XrFovf ComputeBoundingFov(const XrFovf& fullFov, const XrVector2f& min, const XrVector2f& max) {
+            const float width = max.x - min.x;
+            const float height = max.y - min.y;
+            const XrVector2f center = (min + max) / 2.f;
 
-            static inline std::pair<float, float> Scale(std::pair<float, float> angles, float scale) {
-                assert(angles.second > angles.first);
-                const float angleCenter = (angles.first + angles.second) / 2;
-                const float angleSpread = angles.second - angles.first;
-                const float angleSpreadScaled = angleSpread * scale;
-                const float angleLowerScaled = angleCenter - (angleSpreadScaled / 2);
-                const float angleUpperScaled = angleCenter + (angleSpreadScaled / 2);
+            assert(width > 0);
+            assert(height > 0);
 
-                return std::make_pair(angleLowerScaled, angleUpperScaled);
-            };
-
-            static inline std::pair<float, float> Lerp(std::pair<float, float> range,
-                                                       std::pair<float, float> angles,
-                                                       float lerp) {
-                assert(angles.second > angles.first);
-                assert(range.second > range.first);
-                const float rangeSpread = range.second - range.first;
-                const float angleSpread = angles.second - angles.first;
-                const float lerpedCenter = range.first + lerp * rangeSpread;
-                float angleLower = lerpedCenter - angleSpread / 2.f;
-                float angleUpper = lerpedCenter + angleSpread / 2.f;
-
-                // Clamp to the FOV boundaries.
-                if (angleUpper > range.second) {
-                    angleUpper = range.second;
-                    angleLower = angleUpper - angleSpread;
-                } else if (angleLower < range.first) {
-                    angleLower = range.first;
-                    angleUpper = angleLower + angleSpread;
-                }
-
-                return std::make_pair(angleLower, angleUpper);
-            };
-
-        } // namespace Fov
+            const auto fullProjection = ComposeProjectionMatrix(fullFov, {0.001f, 100.f});
+            // clang-format off
+            const auto boundingFov =
+                DirectX::XMMATRIX(2.f / width,                0.f,                          0.f, 0.f,
+                                  0.f,                        2.f / height,                 0.f, 0.f,
+                                  0.f,                        0.f,                          1.f, 0.f,
+                                  -(2.f * center.x) / width,  1*-(2.f * center.y) / height, 0.f, 1.f);
+            // clang-format on
+            DirectX::XMFLOAT4X4 projection;
+            DirectX::XMStoreFloat4x4(&projection, DirectX::XMMatrixMultiply(fullProjection, boundingFov));
+            return DecomposeProjectionMatrix(projection);
+        }
 
         static bool ProjectPoint(const XrView& eyeInViewSpace,
                                  const XrVector3f& forward,
                                  XrVector2f& projectedPosition) {
             // 1) Compute the view space to camera transform for this eye.
-            const auto cameraProjection = xr::math::ComposeProjectionMatrix(eyeInViewSpace.fov, {0.001f, 100.f});
-            const auto cameraView = xr::math::LoadXrPose(eyeInViewSpace.pose);
+            const auto cameraProjection = ComposeProjectionMatrix(eyeInViewSpace.fov, {0.001f, 100.f});
+            const auto cameraView = LoadXrPose(eyeInViewSpace.pose);
             const auto viewToCamera = DirectX::XMMatrixMultiply(cameraProjection, cameraView);
 
             // 2) Transform the 3D point to camera space.
