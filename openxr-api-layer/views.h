@@ -35,12 +35,9 @@ namespace xr {
     namespace math {
 
         static XrFovf ComputeBoundingFov(const XrFovf& fullFov, const XrVector2f& min, const XrVector2f& max) {
-            const float width = max.x - min.x;
-            const float height = max.y - min.y;
+            const float width = std::max(0.01f, max.x - min.x);
+            const float height = std::max(0.01f, max.y - min.y);
             const XrVector2f center = (min + max) / 2.f;
-
-            assert(width > 0);
-            assert(height > 0);
 
             const auto fullProjection = ComposeProjectionMatrix(fullFov, {0.001f, 100.f});
             // clang-format off
