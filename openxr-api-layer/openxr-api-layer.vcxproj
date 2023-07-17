@@ -128,6 +128,7 @@ REM Copy dependencies.
 $(SolutionDir)\scripts\sed.exe "s/XR_APILAYER_name/$(SolutionName)/g" $(ProjectDir)\openxr-api-layer.json &gt; $(OutDir)\openxr-api-layer.json
 copy $(SolutionDir)\scripts\Install-Layer.ps1 $(OutDir)
 copy $(SolutionDir)\scripts\Uninstall-Layer.ps1 $(OutDir)
+copy $(SolutionDir)\settings.cfg $(OutDir)
 </Command>
     </PostBuildEvent>
     <PostBuildEvent>
@@ -175,9 +176,11 @@ if not defined PFX_NAME set PFX_NAME=selfsigncert
 $(SolutionDir)\installer\signtool.exe sign /d "OpenXR Quad Views Foveated" /du "https://mbucchia.github.io/Quad-Views-Foveated/" /f $(SolutionDir)\installer\%PFX_NAME%.pfx /p "%PFX_PASSWORD%" /v $(TargetPath)
 :skip_signing
 
-REM Copy dependencies.$(SolutionDir)\scripts\sed.exe "s/XR_APILAYER_name/$(SolutionName)/g" $(ProjectDir)\openxr-api-layer-32.json &gt; $(OutDir)\openxr-api-layer-32.json
+REM Copy dependencies.
+$(SolutionDir)\scripts\sed.exe "s/XR_APILAYER_name/$(SolutionName)/g" $(ProjectDir)\openxr-api-layer-32.json &gt; $(OutDir)\openxr-api-layer-32.json
 copy $(SolutionDir)\scripts\Install-Layer32.ps1 $(OutDir)
 copy $(SolutionDir)\scripts\Uninstall-Layer32.ps1 $(OutDir)
+copy $(SolutionDir)\settings.cfg $(OutDir)
 </Command>
     </PostBuildEvent>
     <PostBuildEvent>
@@ -233,6 +236,7 @@ REM Copy dependencies.
 $(SolutionDir)\scripts\sed.exe "s/XR_APILAYER_name/$(SolutionName)/g" $(ProjectDir)\openxr-api-layer.json &gt; $(OutDir)\openxr-api-layer.json
 copy $(SolutionDir)\scripts\Install-Layer.ps1 $(OutDir)
 copy $(SolutionDir)\scripts\Uninstall-Layer.ps1 $(OutDir)
+copy $(SolutionDir)\settings.cfg $(OutDir)
 </Command>
     </PostBuildEvent>
     <PostBuildEvent>
@@ -284,9 +288,11 @@ if not defined PFX_NAME set PFX_NAME=selfsigncert
 $(SolutionDir)\installer\signtool.exe sign /d "OpenXR Quad Views Foveated" /du "https://mbucchia.github.io/Quad-Views-Foveated/" /f $(SolutionDir)\installer\%PFX_NAME%.pfx /p "%PFX_PASSWORD%" /v $(TargetPath)
 :skip_signing
 
-REM Copy dependencies.$(SolutionDir)\scripts\sed.exe "s/XR_APILAYER_name/$(SolutionName)/g" $(ProjectDir)\openxr-api-layer-32.json &gt; $(OutDir)\openxr-api-layer-32.json
+REM Copy dependencies.
+$(SolutionDir)\scripts\sed.exe "s/XR_APILAYER_name/$(SolutionName)/g" $(ProjectDir)\openxr-api-layer-32.json &gt; $(OutDir)\openxr-api-layer-32.json
 copy $(SolutionDir)\scripts\Install-Layer32.ps1 $(OutDir)
 copy $(SolutionDir)\scripts\Uninstall-Layer32.ps1 $(OutDir)
+copy $(SolutionDir)\settings.cfg $(OutDir)
 </Command>
     </PostBuildEvent>
     <PostBuildEvent>

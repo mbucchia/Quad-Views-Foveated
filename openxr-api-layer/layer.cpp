@@ -174,7 +174,9 @@ namespace openxr_api_layer {
                               TLArg(m_horizontalFovSection[1], "FoveatedHorizontalSection"),
                               TLArg(m_verticalFovSection[1], "FoveatedVerticalSection"),
                               TLArg(m_verticalFocusBias, "VerticalFocusBias"),
-                              TLArg(m_edgeMaxWidenAngle, "EdgeMaxWidenAngle"),
+                              TLArg(m_horizontalFocusBias, "HorizontalFocusBias"),
+                              TLArg(m_edgeMaxHorizontalWidenAngle, "EdgeMaxHorizontalWidenAngle"),
+                              TLArg(m_edgeMaxVerticalWidenAngle, "EdgeMaxVerticalWidenAngle"),
                               TLArg(m_focusWideningDeadzone, "FocusWideningDeadzone"),
                               TLArg(m_preferFoveatedRendering, "PreferFoveatedRendering"),
                               TLArg(m_smoothenFocusViewEdges, "SmoothenEdges"),
@@ -865,25 +867,32 @@ namespace openxr_api_layer {
                                         // Shift FOV according to the eye gaze.
                                         // We also widen the FOV when near the edges of the headset to make sure there's
                                         // enough overlap between the two eyes.
-                                        const XrVector2f centerOfFov{(projectedGaze.x + 1.f) / 2.f,
-                                                                     (1.f - projectedGaze.y + m_verticalFocusBias) /
-                                                                         2.f};
+                                        const XrVector2f centerOfFov{
+                                            (projectedGaze.x +
+                                             (stereoViewIndex == xr::StereoView::Left ? -m_horizontalFocusBias
+                                                                                      : m_horizontalFocusBias) +
+                                             1.f) /
+                                                2.f,
+                                            (1.f - projectedGaze.y + m_verticalFocusBias) / 2.f};
                                         const XrVector2f v = centerOfFov - m_centerOfFov[stereoViewIndex];
                                         const float distanceFromCenter = std::sqrt(v.x * v.x + v.y * v.y);
-                                        const float widenHalfAngle =
-                                            std::clamp(distanceFromCenter - m_focusWideningDeadzone, 0.f, 0.5f) *
-                                            m_edgeMaxWidenAngle;
+                                        const float widenHalfFactor =
+                                            std::clamp(distanceFromCenter - m_focusWideningDeadzone, 0.f, 0.5f);
                                         XrFovf globalFov = m_cachedEyeFov[i % xr::StereoView::Count];
-                                        std::tie(views[i].fov.angleLeft, views[i].fov.angleRight) =
-                                            Fov::Lerp(std::make_pair(globalFov.angleLeft, globalFov.angleRight),
-                                                      std::make_pair(m_cachedEyeFov[i + 2].angleLeft - widenHalfAngle,
-                                                                     m_cachedEyeFov[i + 2].angleRight + widenHalfAngle),
-                                                      centerOfFov.x);
-                                        std::tie(views[i].fov.angleDown, views[i].fov.angleUp) =
-                                            Fov::Lerp(std::make_pair(globalFov.angleDown, globalFov.angleUp),
-                                                      std::make_pair(m_cachedEyeFov[i + 2].angleDown - widenHalfAngle,
-                                                                     m_cachedEyeFov[i + 2].angleUp + widenHalfAngle),
-                                                      centerOfFov.y);
+                                        std::tie(views[i].fov.angleLeft, views[i].fov.angleRight) = Fov::Lerp(
+                                            std::make_pair(globalFov.angleLeft, globalFov.angleRight),
+                                            std::make_pair(m_cachedEyeFov[i + 2].angleLeft -
+                                                               (widenHalfFactor * m_edgeMaxHorizontalWidenAngle),
+                                                           m_cachedEyeFov[i + 2].angleRight +
+                                                               (widenHalfFactor * m_edgeMaxHorizontalWidenAngle)),
+                                            centerOfFov.x);
+                                        std::tie(views[i].fov.angleDown, views[i].fov.angleUp) = Fov::Lerp(
+                                            std::make_pair(globalFov.angleDown, globalFov.angleUp),
+                                            std::make_pair(m_cachedEyeFov[i + 2].angleDown -
+                                                               (widenHalfFactor * m_edgeMaxVerticalWidenAngle),
+                                                           m_cachedEyeFov[i + 2].angleUp +
+                                                               (widenHalfFactor * m_edgeMaxVerticalWidenAngle)),
+                                            centerOfFov.y);
                                     }
                                 }
 
@@ -1711,8 +1720,8 @@ namespace openxr_api_layer {
 
             if (!getStateOnly) {
                 const auto gaze = LoadXrPose(location.pose);
-                const auto gazeProjectedPoint =
-                    DirectX::XMVector3Transform(DirectX::XMVectorSet(0.f, 0.f, 1.f, 1.f), gaze);
+                const auto gazeProjectedPoint = DirectX::XMVector3Normalize(
+                    DirectX::XMVector3Transform(DirectX::XMVectorSet(0.f, 0.f, 1.f, 1.f), gaze));
 
                 unitVector.x = gazeProjectedPoint.m128_f32[0];
                 unitVector.y = -gazeProjectedPoint.m128_f32[1];
@@ -2151,15 +2160,18 @@ namespace openxr_api_layer {
             cacheStereoView(systemId, session);
 
             XrView view[xr::StereoView::Count]{{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
-            XrVector2f projectedGaze[xr::StereoView::Count]{{}, {}};
             for (uint32_t eye = 0; eye < xr::StereoView::Count; eye++) {
                 view[eye].fov = m_cachedEyeFov[eye];
                 view[eye].pose = m_cachedEyePoses[eye];
 
                 // Calculate the "resting" gaze position.
-                ProjectPoint(view[eye], {0.f, 0.f, -1.f}, projectedGaze[eye]);
-                m_centerOfFov[eye].x = (projectedGaze[eye].x + 1.f) / 2.f;
-                m_centerOfFov[eye].y = (1.f - projectedGaze[eye].y + m_verticalFocusBias) / 2.f;
+                XrVector2f projectedGaze{};
+                ProjectPoint(view[eye], {0.f, 0.f, -1.f}, projectedGaze);
+                m_centerOfFov[eye].x =
+                    (projectedGaze.x + (eye == xr::StereoView::Left ? -m_horizontalFocusBias : m_horizontalFocusBias) +
+                     1.f) /
+                    2.f;
+                m_centerOfFov[eye].y = (1.f - projectedGaze.y + m_verticalFocusBias) / 2.f;
             }
 
             for (uint32_t foveated = 0; foveated <= 1; foveated++) {
@@ -2354,15 +2366,24 @@ namespace openxr_api_layer {
                     }
                 });
                 DEBUG_ACTION(VerticalFocusBiasUp, 'O', {
-                    m_verticalFocusBias = std::clamp(m_verticalFocusBias + 0.01f, -1.f, 1.f);
+                    if (GetAsyncKeyState(VK_SHIFT)) {
+                        m_horizontalFocusBias = std::clamp(m_horizontalFocusBias + 0.01f, -1.f, 1.f);
+                    } else {
+                        m_verticalFocusBias = std::clamp(m_verticalFocusBias + 0.01f, -1.f, 1.f);
+                    }
                 });
                 DEBUG_ACTION(VerticalFocusBiasDown, 'L', {
-                    m_verticalFocusBias = std::clamp(m_verticalFocusBias - 0.01f, -1.f, 1.f);
+                    if (GetAsyncKeyState(VK_SHIFT)) {
+                        m_horizontalFocusBias = std::clamp(m_horizontalFocusBias - 0.01f, -1.f, 1.f);
+                    } else {
+                        m_verticalFocusBias = std::clamp(m_verticalFocusBias - 0.01f, -1.f, 1.f);
+                    }
                 });
 
                 if (log) {
                     Log(fmt::format("sharpen_focus_view={:.1f}\n", m_sharpenFocusView));
                     Log(fmt::format("smoothen_focus_view_edges={:.2f}\n", m_smoothenFocusViewEdges));
+                    Log(fmt::format("horizontal_focus_bias={:.2f}\n", m_horizontalFocusBias));
                     Log(fmt::format("vertical_focus_bias={:.2f}\n", m_verticalFocusBias));
                 }
             }
@@ -2436,11 +2457,17 @@ namespace openxr_api_layer {
                     } else if (name == "vertical_focus_section") {
                         m_verticalFovSection[1] = std::clamp(std::stof(value), 0.1f, 0.9f);
                         parsed = true;
+                    } else if (name == "horizontal_focus_bias") {
+                        m_horizontalFocusBias = std::clamp(std::stof(value), -0.5f, 0.5f);
+                        parsed = true;
                     } else if (name == "vertical_focus_bias") {
                         m_verticalFocusBias = std::clamp(std::stof(value), -0.5f, 0.5f);
                         parsed = true;
-                    } else if (name == "edge_max_widen_angle") {
-                        m_edgeMaxWidenAngle = std::clamp(std::stof(value), 0.f, (float)M_PI_4);
+                    } else if (name == "edge_max_horizontal_widen_angle") {
+                        m_edgeMaxHorizontalWidenAngle = std::clamp(std::stof(value), 0.f, (float)M_PI_4);
+                        parsed = true;
+                    } else if (name == "edge_max_vertical_widen_angle") {
+                        m_edgeMaxVerticalWidenAngle = std::clamp(std::stof(value), 0.f, (float)M_PI_4);
                         parsed = true;
                     } else if (name == "focus_widening_deadzone") {
                         m_focusWideningDeadzone = std::clamp(std::stof(value), 0.f, 0.5f);
@@ -2509,7 +2536,9 @@ namespace openxr_api_layer {
         float m_horizontalFovSection[2]{0.75f, 0.5f};
         float m_verticalFovSection[2]{0.7f, 0.5f};
         float m_verticalFocusBias{0.25f};
-        float m_edgeMaxWidenAngle{0.122173f};
+        float m_horizontalFocusBias{0.f};
+        float m_edgeMaxHorizontalWidenAngle{0.122173f};
+        float m_edgeMaxVerticalWidenAngle{0.122173f};
         float m_focusWideningDeadzone{0.15f};
         bool m_preferFoveatedRendering{true};
         float m_smoothenFocusViewEdges{0.2f};
