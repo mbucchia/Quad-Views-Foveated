@@ -867,13 +867,14 @@ namespace openxr_api_layer {
                                         // Shift FOV according to the eye gaze.
                                         // We also widen the FOV when near the edges of the headset to make sure there's
                                         // enough overlap between the two eyes.
+                                        m_eyeGaze[stereoViewIndex] = projectedGaze;
                                         const XrVector2f centerOfFov{
                                             (projectedGaze.x +
                                              (stereoViewIndex == xr::StereoView::Left ? -m_horizontalFocusBias
                                                                                       : m_horizontalFocusBias) +
                                              1.f) /
                                                 2.f,
-                                            (1.f - projectedGaze.y + m_verticalFocusBias) / 2.f};
+                                            (projectedGaze.y + m_verticalFocusBias + 1.f) / 2.f};
                                         const XrVector2f v = centerOfFov - m_centerOfFov[stereoViewIndex];
                                         const float distanceFromCenter = std::sqrt(v.x * v.x + v.y * v.y);
                                         const float widenHalfFactor =
@@ -1693,9 +1694,8 @@ namespace openxr_api_layer {
                 const auto gazeProjectedPoint =
                     DirectX::XMVector3Transform(DirectX::XMVectorSet(0.f, 0.f, 1.f, 1.f), gaze);
 
-                unitVector.x = gazeProjectedPoint.m128_f32[0];
-                unitVector.y = -gazeProjectedPoint.m128_f32[1];
-                unitVector.z = gazeProjectedPoint.m128_f32[2];
+                unitVector = Normalize(
+                    {gazeProjectedPoint.m128_f32[0], gazeProjectedPoint.m128_f32[1], gazeProjectedPoint.m128_f32[2]});
             }
 
             return true;
@@ -1720,12 +1720,11 @@ namespace openxr_api_layer {
 
             if (!getStateOnly) {
                 const auto gaze = LoadXrPose(location.pose);
-                const auto gazeProjectedPoint = DirectX::XMVector3Normalize(
-                    DirectX::XMVector3Transform(DirectX::XMVectorSet(0.f, 0.f, 1.f, 1.f), gaze));
+                const auto gazeProjectedPoint =
+                    DirectX::XMVector3Transform(DirectX::XMVectorSet(0.f, 0.f, 1.f, 1.f), gaze);
 
-                unitVector.x = gazeProjectedPoint.m128_f32[0];
-                unitVector.y = -gazeProjectedPoint.m128_f32[1];
-                unitVector.z = gazeProjectedPoint.m128_f32[2];
+                unitVector = Normalize(
+                    {gazeProjectedPoint.m128_f32[0], gazeProjectedPoint.m128_f32[1], gazeProjectedPoint.m128_f32[2]});
             }
 
             return true;
@@ -1755,7 +1754,7 @@ namespace openxr_api_layer {
                 POINT cursor{};
                 GetCursorPos(&cursor);
 
-                XrVector2f point = {(float)cursor.x / 1000.f, (1000.f - cursor.y) / 1000.f};
+                XrVector2f point = {(float)cursor.x / 1000.f, (float)cursor.y / 1000.f};
                 unitVector = Normalize({point.x - 0.5f, 0.5f - point.y, -0.35f});
 
                 result = true;
@@ -2046,6 +2045,20 @@ namespace openxr_api_layer {
             m_renderContext->PSSetShader(m_projectionPS.Get(), nullptr, 0);
             m_renderContext->Draw(3, 0);
 
+            if (m_debugEyeGaze) {
+                XrOffset2Di eyeGaze; // Screen coordinates.
+                eyeGaze.x = (uint32_t)(m_fullFovResolution.width * (m_eyeGaze[viewIndex].x + 1.f) / 2.f);
+                eyeGaze.y = (uint32_t)(m_fullFovResolution.height * (1.f - m_eyeGaze[viewIndex].y) / 2.f);
+
+                const float color[] = {0.5f, 0, 0.5f, 1};
+                D3D11_RECT rect;
+                rect.left = eyeGaze.x - 10;
+                rect.right = eyeGaze.x + 10;
+                rect.top = eyeGaze.y - 10;
+                rect.bottom = eyeGaze.y + 10;
+                m_renderContext->ClearView(rtv.Get(), color, &rect, 1);
+            }
+
             if (IsTraceEnabled()) {
                 m_compositionTimer[m_timerIndex]->stop();
             }
@@ -2167,11 +2180,12 @@ namespace openxr_api_layer {
                 // Calculate the "resting" gaze position.
                 XrVector2f projectedGaze{};
                 ProjectPoint(view[eye], {0.f, 0.f, -1.f}, projectedGaze);
+                m_eyeGaze[eye] = projectedGaze;
                 m_centerOfFov[eye].x =
                     (projectedGaze.x + (eye == xr::StereoView::Left ? -m_horizontalFocusBias : m_horizontalFocusBias) +
                      1.f) /
                     2.f;
-                m_centerOfFov[eye].y = (1.f - projectedGaze.y + m_verticalFocusBias) / 2.f;
+                m_centerOfFov[eye].y = (projectedGaze.y + m_verticalFocusBias + 1.f) / 2.f;
             }
 
             for (uint32_t foveated = 0; foveated <= 1; foveated++) {
@@ -2490,6 +2504,9 @@ namespace openxr_api_layer {
                     } else if (name == "debug_focus_view") {
                         m_debugFocusView = std::stoi(value);
                         parsed = true;
+                    } else if (name == "debug_eye_gaze") {
+                        m_debugEyeGaze = std::stoi(value);
+                        parsed = true;
                     } else if (name == "debug_force_no_foveated") {
                         m_debugForceNoFoveated = std::stoi(value);
                         parsed = true;
@@ -2535,7 +2552,7 @@ namespace openxr_api_layer {
         // [0] = non-foveated, [1] = foveated
         float m_horizontalFovSection[2]{0.75f, 0.5f};
         float m_verticalFovSection[2]{0.7f, 0.5f};
-        float m_verticalFocusBias{0.25f};
+        float m_verticalFocusBias{0.f};
         float m_horizontalFocusBias{0.f};
         float m_edgeMaxHorizontalWidenAngle{0.122173f};
         float m_edgeMaxVerticalWidenAngle{0.122173f};
@@ -2552,6 +2569,7 @@ namespace openxr_api_layer {
         XrFovf m_cachedEyeFov[xr::QuadView::Count + 2]{};
         XrPosef m_cachedEyePoses[xr::StereoView::Count]{};
         XrVector2f m_centerOfFov[xr::StereoView::Count]{};
+        XrVector2f m_eyeGaze[xr::StereoView::Count]{};
 
         XrExtent2Di m_fullFovResolution{};
 
@@ -2602,6 +2620,7 @@ namespace openxr_api_layer {
         bool m_isSupportedGraphicsApi{false};
 
         bool m_debugFocusView{false};
+        bool m_debugEyeGaze{false};
         bool m_debugSimulateTracking{false};
         bool m_debugForceNoFoveated{false};
         bool m_debugDeferPopulateFovTable{true};
