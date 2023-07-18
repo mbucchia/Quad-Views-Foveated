@@ -18,7 +18,7 @@ Download the latest version from the [Releases page](https://github.com/mbucchia
 
 More information on the [the wiki](https://github.com/mbucchia/Quad-Views-Foveated/wiki)!
 
-For troubleshooting, the log file can be found at `%LocalAppData%\XR_APILAYER_MBUCCHIA_quad_views_foveated\XR_APILAYER_MBUCCHIA_quad_views_foveated.log`.
+For troubleshooting, the log file can be found at `%LocalAppData%\Quad-Views-Foveated\Quad-Views-Foveated.log`.
 
 ## Donate
 
@@ -31,5 +31,8 @@ Thank you!
 Thanks to my beta testers for helping throughout development and release (in alphabetical order):
 
 - BARRACUDAS
+- edmuss
+- MastahFR
+- mfrisby
 - Omniwhatever
 - xMcCARYx
