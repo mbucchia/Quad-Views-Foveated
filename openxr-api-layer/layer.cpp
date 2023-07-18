@@ -2459,11 +2459,11 @@ namespace openxr_api_layer {
 
         XrSystemId m_systemId{XR_NULL_SYSTEM_ID};
 
-        float m_peripheralPixelDensity{0.4f};
-        float m_focusPixelDensity{1.1f};
+        float m_peripheralPixelDensity{0.5f};
+        float m_focusPixelDensity{1.f};
         // [0] = non-foveated, [1] = foveated
-        float m_horizontalFovSection[2]{0.75f, 0.5f};
-        float m_verticalFovSection[2]{0.7f, 0.5f};
+        float m_horizontalFovSection[2]{0.75f, 0.35f};
+        float m_verticalFovSection[2]{0.7f, 0.35f};
         float m_verticalFocusOffset{0.f};
         float m_horizontalFocusOffset{0.f};
         float m_horizontalFocusWideningMultiplier{0.5f};
