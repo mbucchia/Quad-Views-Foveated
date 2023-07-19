@@ -468,8 +468,8 @@
         {
         "Name" = "8:Microsoft Visual Studio"
         "ProductName" = "8:OpenXR-Quad-Views-Foveated"
-        "ProductCode" = "8:{F6B78690-BB12-4B96-863A-3402AF6E8DB6}"
-        "PackageCode" = "8:{B95CCC43-F5C8-4A60-AAC9-6EF89371AFA2}"
+        "ProductCode" = "8:{F7D65F85-9A21-4ED7-85D7-E47F00959B71}"
+        "PackageCode" = "8:{046AA4D3-CC0D-47D8-B134-F1B31F7E1FF4}"
         "UpgradeCode" = "8:{1685CBAF-3515-4983-8944-D9D95A631F4C}"
         "AspNetVersion" = "8:2.0.50727.0"
         "RestartWWWService" = "11:FALSE"
