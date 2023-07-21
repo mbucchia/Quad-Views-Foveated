@@ -215,21 +215,27 @@ namespace openxr_api_layer {
                     TLArg(eyeGazeInteractionProperties.supportsEyeGazeInteraction, "SupportsEyeGazeInteraction"),
                     TLArg(eyeTrackingProperties.supportsEyeTracking, "SupportsEyeTracking"));
 
-                m_isEyeTrackingAvailable = m_debugSimulateTracking || eyeTrackingProperties.supportsEyeTracking ||
-                                           eyeGazeInteractionProperties.supportsEyeGazeInteraction;
-
-                // Prefer the eye gaze interaction extension over the social eye tracking extension.
-                m_useEyeTrackingFB = eyeTrackingProperties.supportsEyeTracking &&
-                                     !eyeGazeInteractionProperties.supportsEyeGazeInteraction;
-
-                if (m_forceNoEyeTracking) {
-                    m_isEyeTrackingAvailable = false;
+                m_trackerType = Tracker::None;
+                if (!m_forceNoEyeTracking) {
+                    if (m_debugSimulateTracking) {
+                        m_trackerType = Tracker::SimulatedTracking;
+                    } else if (eyeGazeInteractionProperties.supportsEyeGazeInteraction) {
+                        // Prefer the eye gaze interaction extension over the social eye tracking extension.
+                        m_trackerType = Tracker::EyeGazeInteraction;
+                    } else if (eyeTrackingProperties.supportsEyeTracking) {
+                        // Last resort if the "social eye tracking".
+                        m_trackerType = Tracker::EyeTrackerFB;
+                    }
                 }
 
                 static bool wasSystemLogged = false;
                 if (!wasSystemLogged) {
+                    XrSystemProperties systemProperties{XR_TYPE_SYSTEM_PROPERTIES};
+                    CHECK_XRCMD(OpenXrApi::xrGetSystemProperties(instance, *systemId, &systemProperties));
+                    TraceLoggingWrite(g_traceProvider, "xrGetSystem", TLArg(systemProperties.systemName, "SystemName"));
                     Log(fmt::format("Using OpenXR system: {}\n", systemProperties.systemName));
-                    Log(fmt::format("Eye tracking is {}\n", m_isEyeTrackingAvailable ? "supported" : "not supported"));
+                    Log(fmt::format("Eye tracking is {}\n",
+                                    m_trackerType != Tracker::None ? "supported" : "not supported"));
                     wasSystemLogged = true;
                 }
             }
@@ -257,7 +263,7 @@ namespace openxr_api_layer {
                     while (foveatedProperties) {
                         if (foveatedProperties->type == XR_TYPE_SYSTEM_FOVEATED_RENDERING_PROPERTIES_VARJO) {
                             foveatedProperties->supportsFoveatedRendering =
-                                m_isEyeTrackingAvailable ? XR_TRUE : XR_FALSE;
+                                m_trackerType != Tracker::None ? XR_TRUE : XR_FALSE;
                             break;
                         }
                         foveatedProperties =
@@ -363,7 +369,7 @@ namespace openxr_api_layer {
 
                         // Override default to specify whether foveated rendering is desired when the application does
                         // not specify.
-                        bool foveatedRenderingActive = m_isEyeTrackingAvailable && m_preferFoveatedRendering;
+                        bool foveatedRenderingActive = m_trackerType != Tracker::None && m_preferFoveatedRendering;
 
                         // When foveated rendering extension is active, look whether the application is requesting it
                         // for the views. The spec is a little questionable and calls for each view to have the flag
@@ -595,19 +601,21 @@ namespace openxr_api_layer {
             if (XR_SUCCEEDED(result)) {
                 TraceLoggingWrite(g_traceProvider, "xrCreateSession", TLXArg(*session, "Session"));
 
-                if (m_isEyeTrackingAvailable) {
-                    if (!m_debugSimulateTracking) {
-                        if (m_useEyeTrackingFB) {
-                            initializeEyeTrackingFB(*session);
-                        } else {
-                            initializeEyeGazeInteraction(*session);
-                        }
+                if (m_trackerType != Tracker::None) {
+                    switch (m_trackerType) {
+                    case Tracker::EyeTrackerFB:
+                        initializeEyeTrackingFB(*session);
+                        break;
 
-                        XrReferenceSpaceCreateInfo spaceCreateInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
-                        spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
-                        spaceCreateInfo.poseInReferenceSpace = Pose::Identity();
-                        CHECK_XRCMD(OpenXrApi::xrCreateReferenceSpace(*session, &spaceCreateInfo, &m_viewSpace));
+                    case Tracker::EyeGazeInteraction:
+                        initializeEyeGazeInteraction(*session);
+                        break;
                     }
+
+                    XrReferenceSpaceCreateInfo spaceCreateInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+                    spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+                    spaceCreateInfo.poseInReferenceSpace = Pose::Identity();
+                    CHECK_XRCMD(OpenXrApi::xrCreateReferenceSpace(*session, &spaceCreateInfo, &m_viewSpace));
                 }
 
                 m_systemId = createInfo->systemId;
@@ -801,7 +809,8 @@ namespace openxr_api_layer {
                                 (XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_VALID_BIT)) {
                                 // Override default to specify whether foveated rendering is desired when the
                                 // application does not specify.
-                                bool foveatedRenderingActive = m_isEyeTrackingAvailable && m_preferFoveatedRendering;
+                                bool foveatedRenderingActive =
+                                    m_trackerType != Tracker::None && m_preferFoveatedRendering;
 
                                 if (m_requestedFoveatedRendering) {
                                     const XrViewLocateFoveatedRenderingVARJO* foveatedLocate =
@@ -1147,7 +1156,7 @@ namespace openxr_api_layer {
             }
 
             if (XR_SUCCEEDED(result)) {
-                if (m_useQuadViews && m_isEyeTrackingAvailable && !m_debugSimulateTracking && !m_useEyeTrackingFB) {
+                if (m_useQuadViews && m_trackerType == Tracker::EyeGazeInteraction) {
                     // TODO: Some applications may not advance the instance event state machine (via xrPollEvent()),
                     // which causes actions to always return an inactive state. Force xrPollEvent() here if needed.
                     XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
@@ -1649,6 +1658,26 @@ namespace openxr_api_layer {
             CHECK_XRCMD(OpenXrApi::xrCreateActionSpace(session, &actionSpaceCreateInfo, &m_eyeSpace));
         }
 
+        bool getSimulatedTracking(XrTime time, bool getStateOnly, XrVector3f& unitVector) {
+            // Use the mouse to simulate eye tracking.
+            if (!getStateOnly) {
+                RECT rect;
+                rect.left = 1;
+                rect.right = 999;
+                rect.top = 1;
+                rect.bottom = 999;
+                ClipCursor(&rect);
+
+                POINT cursor{};
+                GetCursorPos(&cursor);
+
+                XrVector2f point = {(float)cursor.x / 1000.f, (float)cursor.y / 1000.f};
+                unitVector = Normalize({point.x - 0.5f, 0.5f - point.y, -0.35f});
+            }
+
+            return true;
+        }
+
         bool getEyeTrackerFB(XrTime time, bool getStateOnly, XrVector3f& unitVector) {
             XrEyeGazesInfoFB eyeGazeInfo{XR_TYPE_EYE_GAZES_INFO_FB};
             eyeGazeInfo.baseSpace = m_viewSpace;
@@ -1708,33 +1737,19 @@ namespace openxr_api_layer {
         }
 
         bool getEyeGaze(XrTime time, bool getStateOnly, XrVector3f& unitVector) {
-            if (!m_isEyeTrackingAvailable) {
-                return false;
-            }
-
             bool result = false;
-            if (!m_debugSimulateTracking) {
-                if (m_useEyeTrackingFB) {
-                    result = getEyeTrackerFB(time, getStateOnly, unitVector);
-                } else {
-                    result = getEyeGazeInteraction(time, getStateOnly, unitVector);
-                }
-            } else {
-                // Use the mouse to simulate eye tracking.
-                RECT rect;
-                rect.left = 1;
-                rect.right = 999;
-                rect.top = 1;
-                rect.bottom = 999;
-                ClipCursor(&rect);
+            switch (m_trackerType) {
+            case Tracker::SimulatedTracking:
+                result = getSimulatedTracking(time, getStateOnly, unitVector);
+                break;
 
-                POINT cursor{};
-                GetCursorPos(&cursor);
+            case Tracker::EyeTrackerFB:
+                result = getEyeTrackerFB(time, getStateOnly, unitVector);
+                break;
 
-                XrVector2f point = {(float)cursor.x / 1000.f, (float)cursor.y / 1000.f};
-                unitVector = Normalize({point.x - 0.5f, 0.5f - point.y, -0.35f});
-
-                result = true;
+            case Tracker::EyeGazeInteraction:
+                result = getEyeGazeInteraction(time, getStateOnly, unitVector);
+                break;
             }
 
             TraceLoggingWrite(g_traceProvider,
@@ -2448,14 +2463,20 @@ namespace openxr_api_layer {
             return active;
         }
 
+        enum Tracker {
+            None = 0,
+            SimulatedTracking,
+            EyeTrackerFB,
+            EyeGazeInteraction,
+        };
+
         bool m_bypassApiLayer{false};
         bool m_useQuadViews{false};
         bool m_requestedFoveatedRendering{false};
         bool m_requestedDepthSubmission{false};
         std::string m_runtimeName;
         bool m_loggedResolution{false};
-        bool m_isEyeTrackingAvailable{false};
-        bool m_useEyeTrackingFB{true};
+        Tracker m_trackerType{Tracker::None};
 
         XrSystemId m_systemId{XR_NULL_SYSTEM_ID};
 
