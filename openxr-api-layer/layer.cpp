@@ -116,7 +116,6 @@ namespace openxr_api_layer {
 
             // Bypass the extension unless the app might request quad views.
             bool requestedQuadViews = false;
-            bool requestedD3D11 = false;
             for (uint32_t i = 0; i < createInfo->enabledExtensionCount; i++) {
                 const std::string_view ext(createInfo->enabledExtensionNames[i]);
                 TraceLoggingWrite(g_traceProvider, "xrCreateInstance", TLArg(ext.data(), "ExtensionName"));
@@ -127,12 +126,12 @@ namespace openxr_api_layer {
                 } else if (ext == XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME) {
                     m_requestedDepthSubmission = true;
                 } else if (ext == XR_KHR_D3D11_ENABLE_EXTENSION_NAME) {
-                    requestedD3D11 = true;
+                    m_requestedD3D11 = true;
                 }
             }
 
             // We only support D3D11 at the moment.
-            m_bypassApiLayer = !(requestedQuadViews && requestedD3D11);
+            m_bypassApiLayer = !(requestedQuadViews && m_requestedD3D11);
             if (m_bypassApiLayer) {
                 Log(fmt::format("{} layer will be bypassed\n", LayerName));
                 return XR_SUCCESS;
@@ -591,21 +590,25 @@ namespace openxr_api_layer {
                               TLArg((int)createInfo->systemId, "SystemId"),
                               TLArg(createInfo->createFlags, "CreateFlags"));
 
-            {
-                const XrBaseInStructure* entry = reinterpret_cast<const XrBaseInStructure*>(createInfo->next);
-                while (entry) {
-                    if (entry->type == XR_TYPE_GRAPHICS_BINDING_D3D11_KHR) {
-                        m_isSupportedGraphicsApi = true;
-                    }
-                    entry = entry->next;
-                }
-            }
-
             const XrResult result = OpenXrApi::xrCreateSession(instance, createInfo, session);
 
             if (XR_SUCCEEDED(result)) {
                 TraceLoggingWrite(g_traceProvider, "xrCreateSession", TLXArg(*session, "Session"));
 
+                // Initialize the minimal resources for the rendering code.
+                const XrBaseInStructure* entry = reinterpret_cast<const XrBaseInStructure*>(createInfo->next);
+                while (entry) {
+                    if (entry->type == XR_TYPE_GRAPHICS_BINDING_D3D11_KHR) {
+                        const XrGraphicsBindingD3D11KHR* d3dBindings =
+                            reinterpret_cast<const XrGraphicsBindingD3D11KHR*>(entry);
+                        initializeDeviceContext(d3dBindings->device);
+                        m_isSupportedGraphicsApi = true;
+                        break;
+                    }
+                    entry = entry->next;
+                }
+
+                // Initialize the resources for the eye tracker.
                 if (m_trackerType != Tracker::None) {
                     switch (m_trackerType) {
                     case Tracker::EyeTrackerFB:
@@ -648,6 +651,14 @@ namespace openxr_api_layer {
             const XrResult result = OpenXrApi::xrDestroySession(session);
 
             if (XR_SUCCEEDED(result)) {
+                for (uint32_t i = 0; i < std::size(m_compositionTimer); i++) {
+                    m_compositionTimer[i].reset();
+                }
+                for (uint32_t i = 0; i < std::size(m_appFrameGpuTimer); i++) {
+                    m_appFrameGpuTimer[i].reset();
+                }
+                m_appFrameCpuTimer.reset();
+                m_appRenderCpuTimer.reset();
                 m_layerContextState.Reset();
                 m_linearClampSampler.Reset();
                 m_noDepthRasterizer.Reset();
@@ -1101,6 +1112,17 @@ namespace openxr_api_layer {
             {
                 std::unique_lock lock(m_frameMutex);
 
+                // Roundup frame statistics.
+                if (IsTraceEnabled() && m_appFrameCpuTimer) {
+                    m_appFrameCpuTimer->stop();
+
+                    TraceLoggingWrite(g_traceProvider,
+                                      "AppStatistics",
+                                      TLArg(m_appFrameCpuTimer->query(), "AppCpuTime"),
+                                      TLArg(m_lastAppRenderCpuTime, "RenderCpuTime"),
+                                      TLArg(m_lastAppFrameGpuTime, "AppGpuTime"));
+                }
+
                 if (m_asyncWaitPromise.valid()) {
                     TraceLoggingWrite(g_traceProvider, "xrWaitFrame_AsyncWaitMode");
 
@@ -1159,6 +1181,15 @@ namespace openxr_api_layer {
                                   TLArg(!!frameState->shouldRender, "ShouldRender"),
                                   TLArg(frameState->predictedDisplayTime, "PredictedDisplayTime"),
                                   TLArg(frameState->predictedDisplayPeriod, "PredictedDisplayPeriod"));
+
+                // Start app timers.
+                {
+                    std::unique_lock lock(m_frameMutex);
+
+                    if (IsTraceEnabled() && m_appFrameCpuTimer) {
+                        m_appFrameCpuTimer->start();
+                    }
+                }
             }
 
             return result;
@@ -1200,6 +1231,16 @@ namespace openxr_api_layer {
                         TraceLoggingWriteStop(local, "xrBeginFrame_SyncActions");
                     }
                 }
+
+                // Start app timers.
+                {
+                    std::unique_lock lock(m_frameMutex);
+
+                    if (IsTraceEnabled() && m_appFrameCpuTimer) {
+                        m_appRenderCpuTimer->start();
+                        m_appFrameGpuTimer[m_appFrameGpuTimerIndex]->start();
+                    }
+                }
             }
 
             return result;
@@ -1216,6 +1257,21 @@ namespace openxr_api_layer {
                               TLXArg(session, "Session"),
                               TLArg(frameEndInfo->displayTime, "DisplayTime"),
                               TLArg(xr::ToCString(frameEndInfo->environmentBlendMode), "EnvironmentBlendMode"));
+
+            {
+                std::unique_lock lock(m_frameMutex);
+
+                // Stop app timers.
+                if (IsTraceEnabled() && m_appFrameCpuTimer) {
+                    m_appRenderCpuTimer->stop();
+                    m_lastAppRenderCpuTime = m_appRenderCpuTimer->query();
+
+                    m_appFrameGpuTimer[m_appFrameGpuTimerIndex]->stop();
+                    m_appFrameGpuTimerIndex = (m_appFrameGpuTimerIndex + 1) % std::size(m_appFrameGpuTimer);
+                    // Latency is 3 frames.
+                    m_lastAppFrameGpuTime = m_appFrameGpuTimer[m_appFrameGpuTimerIndex]->query();
+                }
+            }
 
             handleDebugKeys();
 
@@ -1863,6 +1919,11 @@ namespace openxr_api_layer {
                                   XrCompositionLayerFlags layerFlags) {
             // TODO: Support D3D12.
 
+            // Lazy initialization of the composition resources.
+            if (!m_projectionPS) {
+                initializeCompositionResources(m_applicationDevice.Get());
+            }
+
             ID3D11Texture2D* sourceImage;
             ID3D11Texture2D* sourceFocusImage;
             ID3D11Texture2D* destinationImage;
@@ -1910,22 +1971,13 @@ namespace openxr_api_layer {
                 TraceLoggingWriteStop(local, "xrEndFrame_GatherInputOutput");
             }
 
-            // Grab a D3D context.
-            {
-                ComPtr<ID3D11Device> device;
-                destinationImage->GetDevice(device.ReleaseAndGetAddressOf());
-
-                if (!m_applicationDevice) {
-                    initializeCompositionResources(device.Get());
-                }
-            }
-
             if (IsTraceEnabled()) {
-                m_timerIndex = (m_timerIndex + 1) % std::size(m_compositionTimer);
+                m_compositionTimerIndex = (m_compositionTimerIndex + 1) % std::size(m_compositionTimer);
                 // Latency is 3 frames.
-                TraceLoggingWrite(
-                    g_traceProvider, "Perf", TLArg(m_compositionTimer[m_timerIndex]->query(), "CompositionTime"));
-                m_compositionTimer[m_timerIndex]->start();
+                TraceLoggingWrite(g_traceProvider,
+                                  "CompositionPerf",
+                                  TLArg(m_compositionTimer[m_compositionTimerIndex]->query(), "CompositionGpuTime"));
+                m_compositionTimer[m_compositionTimerIndex]->start();
             }
 
             // Copy to a flat texture for sampling.
@@ -2170,7 +2222,7 @@ namespace openxr_api_layer {
             }
 
             if (IsTraceEnabled()) {
-                m_compositionTimer[m_timerIndex]->stop();
+                m_compositionTimer[m_compositionTimerIndex]->stop();
             }
 
             {
@@ -2182,35 +2234,46 @@ namespace openxr_api_layer {
             }
         }
 
+        void initializeDeviceContext(ID3D11Device* device) {
+            UINT creationFlags = 0;
+            if (device->GetCreationFlags() & D3D11_CREATE_DEVICE_SINGLETHREADED) {
+                creationFlags |= D3D11_1_CREATE_DEVICE_CONTEXT_STATE_SINGLETHREADED;
+            }
+            const D3D_FEATURE_LEVEL featureLevel = device->GetFeatureLevel();
+
+            CHECK_HRCMD(device->QueryInterface(m_applicationDevice.ReleaseAndGetAddressOf()));
+
+            // Create a switchable context state for the API layer.
+            CHECK_HRCMD(m_applicationDevice->CreateDeviceContextState(creationFlags,
+                                                                      &featureLevel,
+                                                                      1,
+                                                                      D3D11_SDK_VERSION,
+                                                                      __uuidof(ID3D11Device),
+                                                                      nullptr,
+                                                                      m_layerContextState.ReleaseAndGetAddressOf()));
+
+            ComPtr<ID3D11DeviceContext> context;
+            m_applicationDevice->GetImmediateContext(context.ReleaseAndGetAddressOf());
+            CHECK_HRCMD(context->QueryInterface(m_renderContext.ReleaseAndGetAddressOf()));
+
+            // For statistics.
+            {
+                XrGraphicsBindingD3D11KHR bindings{};
+                bindings.device = device;
+                std::shared_ptr<graphics::IGraphicsDevice> graphicsDevice =
+                    graphics::internal::wrapApplicationDevice(bindings);
+                for (uint32_t i = 0; i < std::size(m_appFrameGpuTimer); i++) {
+                    m_appFrameGpuTimer[i] = graphicsDevice->createTimer();
+                }
+                m_appFrameCpuTimer = general::createTimer();
+                m_appRenderCpuTimer = general::createTimer();
+            }
+        }
+
         void initializeCompositionResources(ID3D11Device* device) {
             TraceLoggingWrite(g_traceProvider, "InitializeCompositionResources");
 
-            {
-                UINT creationFlags = 0;
-                if (device->GetCreationFlags() & D3D11_CREATE_DEVICE_SINGLETHREADED) {
-                    creationFlags |= D3D11_1_CREATE_DEVICE_CONTEXT_STATE_SINGLETHREADED;
-                }
-                const D3D_FEATURE_LEVEL featureLevel = device->GetFeatureLevel();
-
-                CHECK_HRCMD(device->QueryInterface(m_applicationDevice.ReleaseAndGetAddressOf()));
-
-                // Create a switchable context state for the API layer.
-                CHECK_HRCMD(
-                    m_applicationDevice->CreateDeviceContextState(creationFlags,
-                                                                  &featureLevel,
-                                                                  1,
-                                                                  D3D11_SDK_VERSION,
-                                                                  __uuidof(ID3D11Device),
-                                                                  nullptr,
-                                                                  m_layerContextState.ReleaseAndGetAddressOf()));
-            }
-
             // For FOV projection.
-            {
-                ComPtr<ID3D11DeviceContext> context;
-                m_applicationDevice->GetImmediateContext(context.ReleaseAndGetAddressOf());
-                CHECK_HRCMD(context->QueryInterface(m_renderContext.ReleaseAndGetAddressOf()));
-            }
             {
                 D3D11_SAMPLER_DESC desc{};
                 desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -2604,6 +2667,7 @@ namespace openxr_api_layer {
         bool m_useQuadViews{false};
         bool m_requestedFoveatedRendering{false};
         bool m_requestedDepthSubmission{false};
+        bool m_requestedD3D11{false};
         std::string m_runtimeName;
         bool m_loggedResolution{false};
         Tracker m_trackerType{Tracker::None};
@@ -2685,8 +2749,16 @@ namespace openxr_api_layer {
         bool m_debugSimulateTracking{false};
         bool m_debugKeys{false};
 
+        std::shared_ptr<general::ITimer> m_appFrameCpuTimer;
+        std::shared_ptr<general::ITimer> m_appRenderCpuTimer;
+        std::shared_ptr<graphics::IGraphicsTimer> m_appFrameGpuTimer[3];
+        uint32_t m_appFrameGpuTimerIndex{0};
+
+        uint64_t m_lastAppRenderCpuTime{0};
+        uint64_t m_lastAppFrameGpuTime{0};
+
         std::shared_ptr<graphics::IGraphicsTimer> m_compositionTimer[3 * xr::StereoView::Count];
-        uint32_t m_timerIndex{0};
+        uint32_t m_compositionTimerIndex{0};
     };
 
     // This method is required by the framework to instantiate your OpenXrApi implementation.
