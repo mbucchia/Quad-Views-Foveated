@@ -1118,6 +1118,7 @@ namespace openxr_api_layer {
 
                     TraceLoggingWrite(g_traceProvider,
                                       "AppStatistics",
+                                      TLArg(m_frameTimes.size(), "Fps"),
                                       TLArg(m_appFrameCpuTimer->query(), "AppCpuTime"),
                                       TLArg(m_lastAppRenderCpuTime, "RenderCpuTime"),
                                       TLArg(m_lastAppFrameGpuTime, "AppGpuTime"));
@@ -1270,6 +1271,12 @@ namespace openxr_api_layer {
                     m_appFrameGpuTimerIndex = (m_appFrameGpuTimerIndex + 1) % std::size(m_appFrameGpuTimer);
                     // Latency is 3 frames.
                     m_lastAppFrameGpuTime = m_appFrameGpuTimer[m_appFrameGpuTimerIndex]->query();
+                }
+
+                const auto now = std::chrono::steady_clock::now();
+                m_frameTimes.push_back(now);
+                while ((now - m_frameTimes.front()).count() >= 1'000'000'000) {
+                    m_frameTimes.pop_front();
                 }
             }
 
@@ -2756,6 +2763,7 @@ namespace openxr_api_layer {
 
         uint64_t m_lastAppRenderCpuTime{0};
         uint64_t m_lastAppFrameGpuTime{0};
+        std::deque<std::chrono::time_point<std::chrono::steady_clock>> m_frameTimes;
 
         std::shared_ptr<graphics::IGraphicsTimer> m_compositionTimer[3 * xr::StereoView::Count];
         uint32_t m_compositionTimerIndex{0};
