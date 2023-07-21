@@ -87,6 +87,7 @@ using Microsoft::WRL::ComPtr;
 #include <XrSide.h>
 #include <XrStereoView.h>
 #include <XrToString.h>
+#include <ScopeGuard.h>
 #include <DirectXCollision.h>
 
 // FMT formatter.

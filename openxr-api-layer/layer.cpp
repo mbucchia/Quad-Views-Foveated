@@ -638,9 +638,9 @@ namespace openxr_api_layer {
             if (m_asyncWaitPromise.valid()) {
                 TraceLocalActivity(local);
 
-                TraceLoggingWriteStart(local, "AsyncWaitNow");
+                TraceLoggingWriteStart(local, "xrDestroySession_AsyncWaitNow");
                 m_asyncWaitPromise.wait_for(5s);
-                TraceLoggingWriteStop(local, "AsyncWaitNow");
+                TraceLoggingWriteStop(local, "xrDestroySession_AsyncWaitNow");
 
                 m_asyncWaitPromise = {};
             }
@@ -900,12 +900,15 @@ namespace openxr_api_layer {
                                 // Quirk for DCS World: the application does not pass the correct FOV for the focus
                                 // views in xrEndFrame(). We must keep track of the correct values for each frame.
                                 if (m_needFocusFovCorrectionQuirk) {
+                                    TraceLocalActivity(local);
+                                    TraceLoggingWriteStart(local, "xrLocateViews_StoreFovForQuirk");
                                     std::unique_lock lock(m_focusFovMutex);
 
                                     m_focusFovForDisplayTime.insert_or_assign(
                                         viewLocateInfo->displayTime,
                                         std::make_pair(views[xr::QuadView::FocusLeft].fov,
                                                        views[xr::QuadView::FocusRight].fov));
+                                    TraceLoggingWriteStop(local, "xrLocateViews_StoreFovForQuirk");
                                 }
                             }
                         }
@@ -991,9 +994,9 @@ namespace openxr_api_layer {
                 if (m_asyncWaitPromise.valid()) {
                     TraceLocalActivity(local);
 
-                    TraceLoggingWriteStart(local, "AsyncWaitNow");
+                    TraceLoggingWriteStart(local, "xrDestroySwapchain_AsyncWaitNow");
                     m_asyncWaitPromise.wait();
-                    TraceLoggingWriteStop(local, "AsyncWaitNow");
+                    TraceLoggingWriteStop(local, "xrDestroySwapchain_AsyncWaitNow");
                 }
             }
 
@@ -1099,16 +1102,16 @@ namespace openxr_api_layer {
                 std::unique_lock lock(m_frameMutex);
 
                 if (m_asyncWaitPromise.valid()) {
-                    TraceLoggingWrite(g_traceProvider, "AsyncWaitMode");
+                    TraceLoggingWrite(g_traceProvider, "xrWaitFrame_AsyncWaitMode");
 
                     // In Turbo mode, we accept pipelining of exactly one frame.
                     if (m_asyncWaitPolled) {
                         TraceLocalActivity(local);
 
                         // On second frame poll, we must wait.
-                        TraceLoggingWriteStart(local, "AsyncWaitNow");
+                        TraceLoggingWriteStart(local, "xrWaitFrame_AsyncWaitNow");
                         m_asyncWaitPromise.wait();
-                        TraceLoggingWriteStop(local, "AsyncWaitNow");
+                        TraceLoggingWriteStop(local, "xrWaitFrame_AsyncWaitNow");
                     }
                     m_asyncWaitPolled = true;
 
@@ -1128,7 +1131,12 @@ namespace openxr_api_layer {
 
                 } else {
                     lock.unlock();
-                    result = OpenXrApi::xrWaitFrame(session, frameWaitInfo, frameState);
+                    {
+                        TraceLocalActivity(local);
+                        TraceLoggingWriteStart(local, "xrWaitFrame_WaitFrame");
+                        result = OpenXrApi::xrWaitFrame(session, frameWaitInfo, frameState);
+                        TraceLoggingWriteStop(local, "xrWaitFrame_WaitFrame");
+                    }
                     lock.lock();
 
                     if (XR_SUCCEEDED(result)) {
@@ -1166,10 +1174,13 @@ namespace openxr_api_layer {
 
                 if (m_asyncWaitPromise.valid()) {
                     // In turbo mode, we do nothing here.
-                    TraceLoggingWrite(g_traceProvider, "AsyncWaitMode");
+                    TraceLoggingWrite(g_traceProvider, "xrBeginFrame_AsyncWaitMode");
                     result = XR_SUCCESS;
                 } else {
+                    TraceLocalActivity(local);
+                    TraceLoggingWriteStart(local, "xrBeginFrame_BeginFrame");
                     result = OpenXrApi::xrBeginFrame(session, frameBeginInfo);
+                    TraceLoggingWriteStop(local, "xrBeginFrame_BeginFrame");
                 }
             }
 
@@ -1220,6 +1231,25 @@ namespace openxr_api_layer {
             XrFrameEndInfo chainFrameEndInfo = *frameEndInfo;
 
             if (m_useQuadViews) {
+                // Save the application context state.
+                ComPtr<ID3DDeviceContextState> applicationContextState;
+                {
+                    TraceLocalActivity(local);
+                    TraceLoggingWriteStart(local, "xrEndFrame_SwapDeviceContextState");
+                    m_renderContext->SwapDeviceContextState(m_layerContextState.Get(),
+                                                            applicationContextState.ReleaseAndGetAddressOf());
+                    m_renderContext->ClearState();
+                    TraceLoggingWriteStop(local, "xrEndFrame_SwapDeviceContextState");
+                }
+
+                // Restore the application context state upon leaving this scope.
+                auto scopeGuard = MakeScopeGuard([&] {
+                    TraceLocalActivity(local);
+                    TraceLoggingWriteStart(local, "xrEndFrame_SwapDeviceContextState");
+                    m_renderContext->SwapDeviceContextState(applicationContextState.Get(), nullptr);
+                    TraceLoggingWriteStop(local, "xrEndFrame_SwapDeviceContextState");
+                });
+
                 std::set<XrSwapchain> swapchainsToRelease;
 
                 for (uint32_t i = 0; i < frameEndInfo->layerCount; i++) {
@@ -1286,6 +1316,10 @@ namespace openxr_api_layer {
                                 createInfo.arraySize = 1;
                                 createInfo.width = m_fullFovResolution.width;
                                 createInfo.height = m_fullFovResolution.height;
+                                TraceLoggingWrite(g_traceProvider,
+                                                  "xrEndFrame_CreateSwapchain",
+                                                  TLArg(m_fullFovResolution.width, "Width"),
+                                                  TLArg(m_fullFovResolution.height, "Height"));
                                 CHECK_XRCMD(OpenXrApi::xrCreateSwapchain(
                                     session, &createInfo, &swapchainForStereoView.fullFovSwapchain[viewIndex]));
                             }
@@ -1295,13 +1329,18 @@ namespace openxr_api_layer {
                                 // Quirk for DCS World: the application does not pass the correct FOV for the
                                 // focus views in xrEndFrame(). We must keep track of the correct values for
                                 // each frame.
+                                TraceLocalActivity(local);
+                                TraceLoggingWriteStart(local, "xrEndFrame_LookupFovForQuirk");
                                 std::unique_lock lock(m_focusFovMutex);
 
+                                bool found = false;
                                 const auto& cit = m_focusFovForDisplayTime.find(frameEndInfo->displayTime);
                                 if (cit != m_focusFovForDisplayTime.cend()) {
                                     focusView.fov = focusViewIndex == xr::QuadView::FocusLeft ? cit->second.first
                                                                                               : cit->second.second;
+                                    found = true;
                                 }
+                                TraceLoggingWriteStop(local, "xrEndFrame_LookupFovForQuirk", TLArg(found, "Found"));
                             }
 
                             // Composite the focus view and the stereo view together into a single stereo view.
@@ -1399,6 +1438,8 @@ namespace openxr_api_layer {
                 chainFrameEndInfo.layerCount = (uint32_t)layers.size();
 
                 if (m_needFocusFovCorrectionQuirk) {
+                    TraceLocalActivity(local);
+                    TraceLoggingWriteStart(local, "xrEndFrame_AgeFovForQuirk");
                     std::unique_lock lock(m_focusFovMutex);
 
                     // Delete all entries older than 1s.
@@ -1406,9 +1447,8 @@ namespace openxr_api_layer {
                            m_focusFovForDisplayTime.cbegin()->first < frameEndInfo->displayTime - 1'000'000'000) {
                         m_focusFovForDisplayTime.erase(m_focusFovForDisplayTime.begin());
                     }
-                    TraceLoggingWrite(g_traceProvider,
-                                      "xrEndFrame",
-                                      TLArg(m_focusFovForDisplayTime.size(), "FovForDisplayTimeDictionarySize"));
+                    TraceLoggingWriteStop(
+                        local, "xrEndFrame_AgeFovForQuirk", TLArg(m_focusFovForDisplayTime.size(), "DictionarySize"));
                 }
 
                 // Perform deferred swapchains release now.
@@ -1433,9 +1473,9 @@ namespace openxr_api_layer {
                     // to attempt a "double xrWaitFrame" when turning on Turbo. Use a timeout to detect that, and
                     // refrain from enqueing a second wait further down. This isn't a pretty solution, but it is simple
                     // and it seems to work effectively (minus the 1s freeze observed in-game).
-                    TraceLoggingWriteStart(local, "AsyncWaitNow");
+                    TraceLoggingWriteStart(local, "xrEndFrame_AsyncWaitNow");
                     const auto ready = m_asyncWaitPromise.wait_for(1s) == std::future_status::ready;
-                    TraceLoggingWriteStop(local, "AsyncWaitNow", TLArg(ready, "Ready"));
+                    TraceLoggingWriteStop(local, "xrEndFrame_AsyncWaitNow", TLArg(ready, "Ready"));
                     if (ready) {
                         m_asyncWaitPromise = {};
                     }
@@ -1443,14 +1483,19 @@ namespace openxr_api_layer {
                     CHECK_XRCMD(OpenXrApi::xrBeginFrame(session, nullptr));
                 }
 
-                result = OpenXrApi::xrEndFrame(session, &chainFrameEndInfo);
+                {
+                    TraceLocalActivity(local);
+                    TraceLoggingWriteStart(local, "xrEndFrame_EndFrame");
+                    result = OpenXrApi::xrEndFrame(session, &chainFrameEndInfo);
+                    TraceLoggingWriteStop(local, "xrEndFrame_EndFrame");
+                }
 
                 if (m_useTurboMode && !m_asyncWaitPromise.valid()) {
                     m_asyncWaitPolled = false;
                     m_asyncWaitCompleted = false;
 
                     // In Turbo mode, we kick off a wait thread immediately.
-                    TraceLoggingWrite(g_traceProvider, "AsyncWaitStart");
+                    TraceLoggingWrite(g_traceProvider, "xrEndFrame_AsyncWaitStart");
                     m_asyncWaitPromise = std::async(std::launch::async, [&, session] {
                         TraceLocalActivity(local);
 
@@ -1818,42 +1863,51 @@ namespace openxr_api_layer {
                                   XrCompositionLayerFlags layerFlags) {
             // TODO: Support D3D12.
 
-            // Grab the input textures.
-            const auto getSourceImage = [&](const XrCompositionLayerProjectionView& view, Swapchain& swapchain) {
-                uint32_t count;
-                CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(view.subImage.swapchain, 0, &count, nullptr));
-                std::vector<XrSwapchainImageD3D11KHR> images(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
-                CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(
-                    view.subImage.swapchain,
-                    count,
-                    &count,
-                    reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())));
-                return images[swapchain.lastReleasedIndex].texture;
-            };
-            ID3D11Texture2D* sourceImage = getSourceImage(stereoView, swapchainForStereoView);
-            ID3D11Texture2D* sourceFocusImage = getSourceImage(focusView, swapchainForFocusView);
-
-            // Grab the output texture.
+            ID3D11Texture2D* sourceImage;
+            ID3D11Texture2D* sourceFocusImage;
             ID3D11Texture2D* destinationImage;
             {
-                uint32_t acquiredImageIndex;
-                CHECK_XRCMD(OpenXrApi::xrAcquireSwapchainImage(
-                    swapchainForStereoView.fullFovSwapchain[viewIndex], nullptr, &acquiredImageIndex));
-                XrSwapchainImageWaitInfo waitInfo{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
-                waitInfo.timeout = 10000000000;
-                CHECK_XRCMD(
-                    OpenXrApi::xrWaitSwapchainImage(swapchainForStereoView.fullFovSwapchain[viewIndex], &waitInfo));
+                TraceLocalActivity(local);
+                TraceLoggingWriteStart(local, "xrEndFrame_GatherInputOutput");
 
-                uint32_t count;
-                CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(
-                    swapchainForStereoView.fullFovSwapchain[viewIndex], 0, &count, nullptr));
-                std::vector<XrSwapchainImageD3D11KHR> images(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
-                CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(
-                    swapchainForStereoView.fullFovSwapchain[viewIndex],
-                    count,
-                    &count,
-                    reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())));
-                destinationImage = images[acquiredImageIndex].texture;
+                // Grab the input textures.
+                const auto getSourceImage = [&](const XrCompositionLayerProjectionView& view, Swapchain& swapchain) {
+                    uint32_t count;
+                    CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(view.subImage.swapchain, 0, &count, nullptr));
+                    std::vector<XrSwapchainImageD3D11KHR> images(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
+                    CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(
+                        view.subImage.swapchain,
+                        count,
+                        &count,
+                        reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())));
+                    return images[swapchain.lastReleasedIndex].texture;
+                };
+                sourceImage = getSourceImage(stereoView, swapchainForStereoView);
+                sourceFocusImage = getSourceImage(focusView, swapchainForFocusView);
+
+                // Grab the output texture.
+                {
+                    uint32_t acquiredImageIndex;
+                    CHECK_XRCMD(OpenXrApi::xrAcquireSwapchainImage(
+                        swapchainForStereoView.fullFovSwapchain[viewIndex], nullptr, &acquiredImageIndex));
+                    XrSwapchainImageWaitInfo waitInfo{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+                    waitInfo.timeout = 10000000000;
+                    CHECK_XRCMD(
+                        OpenXrApi::xrWaitSwapchainImage(swapchainForStereoView.fullFovSwapchain[viewIndex], &waitInfo));
+
+                    uint32_t count;
+                    CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(
+                        swapchainForStereoView.fullFovSwapchain[viewIndex], 0, &count, nullptr));
+                    std::vector<XrSwapchainImageD3D11KHR> images(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
+                    CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(
+                        swapchainForStereoView.fullFovSwapchain[viewIndex],
+                        count,
+                        &count,
+                        reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())));
+                    destinationImage = images[acquiredImageIndex].texture;
+                }
+
+                TraceLoggingWriteStop(local, "xrEndFrame_GatherInputOutput");
             }
 
             // Grab a D3D context.
@@ -1866,64 +1920,69 @@ namespace openxr_api_layer {
                 }
             }
 
-            // Save the application context state.
-            ComPtr<ID3DDeviceContextState> applicationContextState;
-            m_renderContext->SwapDeviceContextState(m_layerContextState.Get(),
-                                                    applicationContextState.ReleaseAndGetAddressOf());
-            m_renderContext->ClearState();
-
             if (IsTraceEnabled()) {
                 m_timerIndex = (m_timerIndex + 1) % std::size(m_compositionTimer);
-                TraceLoggingWrite(g_traceProvider,
-                                  "xrEndFrame_Perf",
-                                  TLArg(m_compositionTimer[m_timerIndex]->query(), "CompositionTime"));
+                // Latency is 3 frames.
+                TraceLoggingWrite(
+                    g_traceProvider, "Perf", TLArg(m_compositionTimer[m_timerIndex]->query(), "CompositionTime"));
                 m_compositionTimer[m_timerIndex]->start();
             }
 
             // Copy to a flat texture for sampling.
-            const auto flattenSourceImage = [&](ID3D11Texture2D* image,
-                                                const XrCompositionLayerProjectionView& view,
-                                                Swapchain& swapchain,
-                                                uint32_t startSlot) {
-                D3D11_TEXTURE2D_DESC desc{};
-                if (swapchain.flatImage[startSlot + viewIndex]) {
-                    swapchain.flatImage[startSlot + viewIndex]->GetDesc(&desc);
-                }
-                if (!swapchain.flatImage[startSlot + viewIndex] || desc.Width != view.subImage.imageRect.extent.width ||
-                    desc.Height != view.subImage.imageRect.extent.height) {
-                    desc = {};
-                    desc.ArraySize = 1;
-                    desc.Width = view.subImage.imageRect.extent.width;
-                    desc.Height = view.subImage.imageRect.extent.height;
-                    desc.Format = (DXGI_FORMAT)swapchain.createInfo.format;
-                    desc.MipLevels = 1;
-                    desc.SampleDesc.Count = 1;
-                    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-                    CHECK_HRCMD(m_applicationDevice->CreateTexture2D(
-                        &desc, nullptr, swapchain.flatImage[startSlot + viewIndex].ReleaseAndGetAddressOf()));
-                }
-                D3D11_BOX box{};
-                box.left = view.subImage.imageRect.offset.x;
-                box.top = view.subImage.imageRect.offset.y;
-                box.right = box.left + view.subImage.imageRect.extent.width;
-                box.bottom = box.top + view.subImage.imageRect.extent.height;
-                box.back = 1;
-                m_renderContext->CopySubresourceRegion(swapchain.flatImage[startSlot + viewIndex].Get(),
-                                                       0,
-                                                       0,
-                                                       0,
-                                                       0,
-                                                       image,
-                                                       view.subImage.imageArrayIndex,
-                                                       &box);
-            };
-            // TODO: We could reduce overhead by avoiding these 2 copies and modifying sampling in our shader to
-            // consider the offset.
-            flattenSourceImage(sourceImage, stereoView, swapchainForStereoView, 0);
-            flattenSourceImage(sourceFocusImage, focusView, swapchainForFocusView, xr::StereoView::Count);
+            {
+                TraceLocalActivity(local);
+                TraceLoggingWriteStart(local, "xrEndFrame_Flatten");
+
+                const auto flattenSourceImage = [&](ID3D11Texture2D* image,
+                                                    const XrCompositionLayerProjectionView& view,
+                                                    Swapchain& swapchain,
+                                                    uint32_t startSlot) {
+                    D3D11_TEXTURE2D_DESC desc{};
+                    if (swapchain.flatImage[startSlot + viewIndex]) {
+                        swapchain.flatImage[startSlot + viewIndex]->GetDesc(&desc);
+                    }
+                    if (!swapchain.flatImage[startSlot + viewIndex] ||
+                        desc.Width != view.subImage.imageRect.extent.width ||
+                        desc.Height != view.subImage.imageRect.extent.height) {
+                        desc = {};
+                        desc.ArraySize = 1;
+                        desc.Width = view.subImage.imageRect.extent.width;
+                        desc.Height = view.subImage.imageRect.extent.height;
+                        desc.Format = (DXGI_FORMAT)swapchain.createInfo.format;
+                        desc.MipLevels = 1;
+                        desc.SampleDesc.Count = 1;
+                        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                        CHECK_HRCMD(m_applicationDevice->CreateTexture2D(
+                            &desc, nullptr, swapchain.flatImage[startSlot + viewIndex].ReleaseAndGetAddressOf()));
+                    }
+                    D3D11_BOX box{};
+                    box.left = view.subImage.imageRect.offset.x;
+                    box.top = view.subImage.imageRect.offset.y;
+                    box.right = box.left + view.subImage.imageRect.extent.width;
+                    box.bottom = box.top + view.subImage.imageRect.extent.height;
+                    box.back = 1;
+                    m_renderContext->CopySubresourceRegion(swapchain.flatImage[startSlot + viewIndex].Get(),
+                                                           0,
+                                                           0,
+                                                           0,
+                                                           0,
+                                                           image,
+                                                           view.subImage.imageArrayIndex,
+                                                           &box);
+                };
+                // TODO: We could reduce overhead by avoiding these 2 copies and modifying sampling in our shader to
+                // consider the offset.
+                flattenSourceImage(sourceImage, stereoView, swapchainForStereoView, 0);
+                flattenSourceImage(sourceFocusImage, focusView, swapchainForFocusView, xr::StereoView::Count);
+
+                TraceLoggingWriteStop(local, "xrEndFrame_Flatten");
+            }
 
             // Sharpen if needed.
             if (m_sharpenFocusView) {
+                TraceLocalActivity(local);
+                TraceLoggingWriteStart(local, "xrEndFrame_Sharpen");
+
                 {
                     D3D11_TEXTURE2D_DESC desc{};
                     if (swapchainForFocusView.sharpenedImage[viewIndex]) {
@@ -1999,120 +2058,133 @@ namespace openxr_api_layer {
                 // Unbind the resources used below to avoid D3D validation errors.
                 ID3D11UnorderedAccessView* nullUAV[] = {nullptr};
                 m_renderContext->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
+
+                TraceLoggingWriteStop(local, "xrEndFrame_Sharpen");
             }
 
-            // Create ephemeral SRV/RTV.
-            ComPtr<ID3D11ShaderResourceView> srvForStereoView;
             {
-                D3D11_SHADER_RESOURCE_VIEW_DESC desc{};
-                desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-                desc.Format = (DXGI_FORMAT)swapchainForStereoView.createInfo.format;
-                desc.Texture2D.MipLevels = 1;
-                CHECK_HRCMD(
-                    m_applicationDevice->CreateShaderResourceView(swapchainForStereoView.flatImage[viewIndex].Get(),
-                                                                  &desc,
-                                                                  srvForStereoView.ReleaseAndGetAddressOf()));
-            }
-            ComPtr<ID3D11ShaderResourceView> srvForFocusView;
-            {
-                D3D11_SHADER_RESOURCE_VIEW_DESC desc{};
-                desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-                desc.Format = m_sharpenFocusView ? DXGI_FORMAT_R16G16B16A16_FLOAT
-                                                 : (DXGI_FORMAT)swapchainForFocusView.createInfo.format;
-                desc.Texture2D.MipLevels = 1;
-                CHECK_HRCMD(m_applicationDevice->CreateShaderResourceView(
-                    m_sharpenFocusView ? swapchainForFocusView.sharpenedImage[viewIndex].Get()
-                                       : swapchainForFocusView.flatImage[xr::StereoView::Count + viewIndex].Get(),
-                    &desc,
-                    srvForFocusView.ReleaseAndGetAddressOf()));
-            }
-            ComPtr<ID3D11RenderTargetView> rtv;
-            {
-                D3D11_RENDER_TARGET_VIEW_DESC desc{};
-                desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-                desc.Format = (DXGI_FORMAT)swapchainForStereoView.createInfo.format;
-                CHECK_HRCMD(
-                    m_applicationDevice->CreateRenderTargetView(destinationImage, &desc, rtv.ReleaseAndGetAddressOf()));
-            }
+                TraceLocalActivity(local);
+                TraceLoggingWriteStart(local, "xrEndFrame_Composite");
 
-            // Compute the projection.
-            ProjectionVSConstants projection;
-            {
-                const DirectX::XMMATRIX baseLayerViewProjection =
-                    ComposeProjectionMatrix(m_cachedEyeFov[viewIndex], NearFar{0.1f, 20.f});
-                const DirectX::XMMATRIX layerViewProjection =
-                    ComposeProjectionMatrix(focusView.fov, NearFar{0.1f, 20.f});
+                // Create ephemeral SRV/RTV.
+                ComPtr<ID3D11ShaderResourceView> srvForStereoView;
+                {
+                    D3D11_SHADER_RESOURCE_VIEW_DESC desc{};
+                    desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+                    desc.Format = (DXGI_FORMAT)swapchainForStereoView.createInfo.format;
+                    desc.Texture2D.MipLevels = 1;
+                    CHECK_HRCMD(
+                        m_applicationDevice->CreateShaderResourceView(swapchainForStereoView.flatImage[viewIndex].Get(),
+                                                                      &desc,
+                                                                      srvForStereoView.ReleaseAndGetAddressOf()));
+                }
+                ComPtr<ID3D11ShaderResourceView> srvForFocusView;
+                {
+                    D3D11_SHADER_RESOURCE_VIEW_DESC desc{};
+                    desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+                    desc.Format = m_sharpenFocusView ? DXGI_FORMAT_R16G16B16A16_FLOAT
+                                                     : (DXGI_FORMAT)swapchainForFocusView.createInfo.format;
+                    desc.Texture2D.MipLevels = 1;
+                    CHECK_HRCMD(m_applicationDevice->CreateShaderResourceView(
+                        m_sharpenFocusView ? swapchainForFocusView.sharpenedImage[viewIndex].Get()
+                                           : swapchainForFocusView.flatImage[xr::StereoView::Count + viewIndex].Get(),
+                        &desc,
+                        srvForFocusView.ReleaseAndGetAddressOf()));
+                }
+                ComPtr<ID3D11RenderTargetView> rtv;
+                {
+                    D3D11_RENDER_TARGET_VIEW_DESC desc{};
+                    desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+                    desc.Format = (DXGI_FORMAT)swapchainForStereoView.createInfo.format;
+                    CHECK_HRCMD(m_applicationDevice->CreateRenderTargetView(
+                        destinationImage, &desc, rtv.ReleaseAndGetAddressOf()));
+                }
 
-                DirectX::XMStoreFloat4x4(
-                    &projection.focusProjection,
-                    DirectX::XMMatrixTranspose(DirectX::XMMatrixInverse(nullptr, baseLayerViewProjection) *
-                                               layerViewProjection));
-            }
-            {
-                D3D11_MAPPED_SUBRESOURCE mappedResources;
-                CHECK_HRCMD(m_renderContext->Map(
-                    m_projectionVSConstants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResources));
-                memcpy(mappedResources.pData, &projection, sizeof(projection));
-                m_renderContext->Unmap(m_projectionVSConstants.Get(), 0);
-            }
+                // Compute the projection.
+                ProjectionVSConstants projection;
+                {
+                    const DirectX::XMMATRIX baseLayerViewProjection =
+                        ComposeProjectionMatrix(m_cachedEyeFov[viewIndex], NearFar{0.1f, 20.f});
+                    const DirectX::XMMATRIX layerViewProjection =
+                        ComposeProjectionMatrix(focusView.fov, NearFar{0.1f, 20.f});
 
-            ProjectionPSConstants drawing{};
-            drawing.smoothingArea = m_smoothenFocusViewEdges;
-            drawing.ignoreAlpha = ~(layerFlags & XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT);
-            drawing.isUnpremultipliedAlpha = layerFlags & XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
-            drawing.debugFocusView = m_debugFocusView;
-            {
-                D3D11_MAPPED_SUBRESOURCE mappedResources;
-                CHECK_HRCMD(m_renderContext->Map(
-                    m_projectionPSConstants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResources));
-                memcpy(mappedResources.pData, &drawing, sizeof(drawing));
-                m_renderContext->Unmap(m_projectionPSConstants.Get(), 0);
-            }
+                    DirectX::XMStoreFloat4x4(
+                        &projection.focusProjection,
+                        DirectX::XMMatrixTranspose(DirectX::XMMatrixInverse(nullptr, baseLayerViewProjection) *
+                                                   layerViewProjection));
+                }
+                {
+                    D3D11_MAPPED_SUBRESOURCE mappedResources;
+                    CHECK_HRCMD(m_renderContext->Map(
+                        m_projectionVSConstants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResources));
+                    memcpy(mappedResources.pData, &projection, sizeof(projection));
+                    m_renderContext->Unmap(m_projectionVSConstants.Get(), 0);
+                }
 
-            // Dispatch the composition shader.
-            m_renderContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-            m_renderContext->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
-            m_renderContext->RSSetState(m_noDepthRasterizer.Get());
-            D3D11_VIEWPORT viewport{};
-            viewport.Width = (float)m_fullFovResolution.width;
-            viewport.Height = (float)m_fullFovResolution.height;
-            viewport.MaxDepth = 1.f;
-            m_renderContext->RSSetViewports(1, &viewport);
-            m_renderContext->VSSetConstantBuffers(0, 1, m_projectionVSConstants.GetAddressOf());
-            m_renderContext->VSSetShader(m_projectionVS.Get(), nullptr, 0);
-            m_renderContext->PSSetConstantBuffers(0, 1, m_projectionPSConstants.GetAddressOf());
-            m_renderContext->PSSetSamplers(0, 1, m_linearClampSampler.GetAddressOf());
-            ID3D11ShaderResourceView* srvs[] = {srvForStereoView.Get(), srvForFocusView.Get()};
-            m_renderContext->PSSetShaderResources(0, 2, srvs);
-            m_renderContext->PSSetShader(m_projectionPS.Get(), nullptr, 0);
-            m_renderContext->Draw(3, 0);
+                ProjectionPSConstants drawing{};
+                drawing.smoothingArea = m_smoothenFocusViewEdges;
+                drawing.ignoreAlpha = ~(layerFlags & XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT);
+                drawing.isUnpremultipliedAlpha = layerFlags & XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+                drawing.debugFocusView = m_debugFocusView;
+                {
+                    D3D11_MAPPED_SUBRESOURCE mappedResources;
+                    CHECK_HRCMD(m_renderContext->Map(
+                        m_projectionPSConstants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResources));
+                    memcpy(mappedResources.pData, &drawing, sizeof(drawing));
+                    m_renderContext->Unmap(m_projectionPSConstants.Get(), 0);
+                }
 
-            if (m_debugEyeGaze) {
-                XrOffset2Di eyeGaze; // Screen coordinates.
-                eyeGaze.x = (uint32_t)(m_fullFovResolution.width * (m_eyeGaze[viewIndex].x + 1.f) / 2.f);
-                eyeGaze.y = (uint32_t)(m_fullFovResolution.height * (1.f - m_eyeGaze[viewIndex].y) / 2.f);
+                // Dispatch the composition shader.
+                m_renderContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+                m_renderContext->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
+                m_renderContext->RSSetState(m_noDepthRasterizer.Get());
+                D3D11_VIEWPORT viewport{};
+                viewport.Width = (float)m_fullFovResolution.width;
+                viewport.Height = (float)m_fullFovResolution.height;
+                viewport.MaxDepth = 1.f;
+                m_renderContext->RSSetViewports(1, &viewport);
+                m_renderContext->VSSetConstantBuffers(0, 1, m_projectionVSConstants.GetAddressOf());
+                m_renderContext->VSSetShader(m_projectionVS.Get(), nullptr, 0);
+                m_renderContext->PSSetConstantBuffers(0, 1, m_projectionPSConstants.GetAddressOf());
+                m_renderContext->PSSetSamplers(0, 1, m_linearClampSampler.GetAddressOf());
+                ID3D11ShaderResourceView* srvs[] = {srvForStereoView.Get(), srvForFocusView.Get()};
+                m_renderContext->PSSetShaderResources(0, 2, srvs);
+                m_renderContext->PSSetShader(m_projectionPS.Get(), nullptr, 0);
+                m_renderContext->Draw(3, 0);
 
-                const float color[] = {0.5f, 0, 0.5f, 1};
-                D3D11_RECT rect;
-                rect.left = eyeGaze.x - 10;
-                rect.right = eyeGaze.x + 10;
-                rect.top = eyeGaze.y - 10;
-                rect.bottom = eyeGaze.y + 10;
-                m_renderContext->ClearView(rtv.Get(), color, &rect, 1);
+                if (m_debugEyeGaze) {
+                    XrOffset2Di eyeGaze; // Screen coordinates.
+                    eyeGaze.x = (uint32_t)(m_fullFovResolution.width * (m_eyeGaze[viewIndex].x + 1.f) / 2.f);
+                    eyeGaze.y = (uint32_t)(m_fullFovResolution.height * (1.f - m_eyeGaze[viewIndex].y) / 2.f);
+
+                    const float color[] = {0.5f, 0, 0.5f, 1};
+                    D3D11_RECT rect;
+                    rect.left = eyeGaze.x - 10;
+                    rect.right = eyeGaze.x + 10;
+                    rect.top = eyeGaze.y - 10;
+                    rect.bottom = eyeGaze.y + 10;
+                    m_renderContext->ClearView(rtv.Get(), color, &rect, 1);
+                }
+
+                TraceLoggingWriteStop(local, "xrEndFrame_Composite");
             }
 
             if (IsTraceEnabled()) {
                 m_compositionTimer[m_timerIndex]->stop();
             }
 
-            // Restore the application context state.
-            m_renderContext->SwapDeviceContextState(applicationContextState.Get(), nullptr);
-
-            CHECK_XRCMD(
-                OpenXrApi::xrReleaseSwapchainImage(swapchainForStereoView.fullFovSwapchain[viewIndex], nullptr));
+            {
+                TraceLocalActivity(local);
+                TraceLoggingWriteStart(local, "xrEndFrame_CommitOutput");
+                CHECK_XRCMD(
+                    OpenXrApi::xrReleaseSwapchainImage(swapchainForStereoView.fullFovSwapchain[viewIndex], nullptr));
+                TraceLoggingWriteStop(local, "xrEndFrame_CommitOutput");
+            }
         }
 
         void initializeCompositionResources(ID3D11Device* device) {
+            TraceLoggingWrite(g_traceProvider, "InitializeCompositionResources");
+
             {
                 UINT creationFlags = 0;
                 if (device->GetCreationFlags() & D3D11_CREATE_DEVICE_SINGLETHREADED) {
@@ -2613,7 +2685,7 @@ namespace openxr_api_layer {
         bool m_debugSimulateTracking{false};
         bool m_debugKeys{false};
 
-        std::shared_ptr<graphics::IGraphicsTimer> m_compositionTimer[3];
+        std::shared_ptr<graphics::IGraphicsTimer> m_compositionTimer[3 * xr::StereoView::Count];
         uint32_t m_timerIndex{0};
     };
 
