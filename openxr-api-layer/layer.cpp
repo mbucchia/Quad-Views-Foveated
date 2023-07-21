@@ -264,6 +264,11 @@ namespace openxr_api_layer {
                         if (foveatedProperties->type == XR_TYPE_SYSTEM_FOVEATED_RENDERING_PROPERTIES_VARJO) {
                             foveatedProperties->supportsFoveatedRendering =
                                 m_trackerType != Tracker::None ? XR_TRUE : XR_FALSE;
+
+                            TraceLoggingWrite(
+                                g_traceProvider,
+                                "xrGetSystemProperties",
+                                TLArg(!!foveatedProperties->supportsFoveatedRendering, "SupportsFoveatedRendering"));
                             break;
                         }
                         foveatedProperties =
@@ -748,6 +753,8 @@ namespace openxr_api_layer {
 
                 // Inject our actionset.
                 actionSets.push_back(m_eyeTrackerActionSet);
+                TraceLoggingWrite(
+                    g_traceProvider, "xrAttachSessionActionSets", TLXArg(m_eyeTrackerActionSet, "EyeTrackerActionSet"));
             }
             chainAttachInfo.actionSets = actionSets.data();
             chainAttachInfo.countActionSets = static_cast<uint32_t>(actionSets.size());
@@ -775,8 +782,6 @@ namespace openxr_api_layer {
                               TLArg(viewLocateInfo->displayTime, "DisplayTime"),
                               TLXArg(viewLocateInfo->space, "Space"),
                               TLArg(viewCapacityInput, "ViewCapacityInput"));
-
-            // TODO: Conformance: viewConfigurationType must match the session.
 
             XrResult result = XR_ERROR_RUNTIME_FAILURE;
             if (viewLocateInfo->viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
@@ -856,6 +861,10 @@ namespace openxr_api_layer {
                                         // Shift FOV according to the eye gaze.
                                         // We also widen the FOV when near the edges of the headset to make sure there's
                                         // enough overlap between the two eyes.
+                                        TraceLoggingWrite(g_traceProvider,
+                                                          "xrLocateViews",
+                                                          TLArg(i, "ViewIndex"),
+                                                          TLArg(xr::ToString(projectedGaze).c_str(), "ProjectedGaze"));
                                         m_eyeGaze[stereoViewIndex] = projectedGaze;
                                         m_eyeGaze[stereoViewIndex] = m_eyeGaze[stereoViewIndex] +
                                                                      XrVector2f{stereoViewIndex == xr::StereoView::Left
@@ -878,6 +887,11 @@ namespace openxr_api_layer {
                                         const XrVector2f max{
                                             std::clamp(m_eyeGaze[stereoViewIndex].x + horizontalFovSection, -1.f, 1.f),
                                             std::clamp(m_eyeGaze[stereoViewIndex].y + verticalFovSection, -1.f, 1.f)};
+                                        TraceLoggingWrite(g_traceProvider,
+                                                          "xrLocateViews",
+                                                          TLArg(i, "ViewIndex"),
+                                                          TLArg(xr::ToString(min).c_str(), "FocusTopLeft"),
+                                                          TLArg(xr::ToString(max).c_str(), "FocusBottomRight"));
                                         views[i].fov =
                                             xr::math::ComputeBoundingFov(m_cachedEyeFov[stereoViewIndex], min, max);
                                     }
@@ -906,8 +920,12 @@ namespace openxr_api_layer {
                     result = XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED;
                 }
             } else {
-                result = OpenXrApi::xrLocateViews(
-                    session, viewLocateInfo, viewState, viewCapacityInput, viewCountOutput, views);
+                if (!m_useQuadViews) {
+                    result = OpenXrApi::xrLocateViews(
+                        session, viewLocateInfo, viewState, viewCapacityInput, viewCountOutput, views);
+                } else {
+                    result = XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED;
+                }
             }
 
             if (XR_SUCCEEDED(result)) {
@@ -1164,7 +1182,12 @@ namespace openxr_api_layer {
                     actionSet.actionSet = m_eyeTrackerActionSet;
                     syncInfo.activeActionSets = &actionSet;
                     syncInfo.countActiveActionSets = 1;
-                    CHECK_XRCMD(xrSyncActions(session, &syncInfo));
+                    {
+                        TraceLocalActivity(local);
+                        TraceLoggingWriteStart(local, "xrBeginFrame_SyncActions");
+                        CHECK_XRCMD(xrSyncActions(session, &syncInfo));
+                        TraceLoggingWriteStop(local, "xrBeginFrame_SyncActions");
+                    }
                 }
             }
 
@@ -1590,28 +1613,38 @@ namespace openxr_api_layer {
                               TLArg(visibilityMask->vertexCapacityInput, "VertexCapacityInput"),
                               TLArg(visibilityMask->indexCapacityInput, "IndexCapacityInput"));
 
-            // TODO: Conformance: viewConfigurationType must match the session.
-
             XrResult result = XR_ERROR_RUNTIME_FAILURE;
             if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO &&
                 viewIndex >= xr::StereoView::Count) {
-                // No mask on the focus view.
-                if (viewIndex == xr::QuadView::FocusLeft || viewIndex == xr::QuadView::FocusRight) {
-                    visibilityMask->vertexCountOutput = 0;
-                    visibilityMask->indexCountOutput = 0;
+                if (m_useQuadViews) {
+                    // No mask on the focus view.
+                    if (viewIndex == xr::QuadView::FocusLeft || viewIndex == xr::QuadView::FocusRight) {
+                        visibilityMask->vertexCountOutput = 0;
+                        visibilityMask->indexCountOutput = 0;
 
-                    result = XR_SUCCESS;
+                        result = XR_SUCCESS;
+                    } else {
+                        result = XR_ERROR_VALIDATION_FAILURE;
+                    }
                 } else {
-                    result = XR_ERROR_VALIDATION_FAILURE;
+                    result = XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED;
                 }
             } else {
                 // We will implement quad views on top of stereo. Use the regular mask for the peripheral view.
                 if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
-                    viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+                    if (m_useQuadViews) {
+                        result = OpenXrApi::xrGetVisibilityMaskKHR(session,
+                                                                   XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+                                                                   viewIndex,
+                                                                   visibilityMaskType,
+                                                                   visibilityMask);
+                    } else {
+                        result = XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED;
+                    }
+                } else {
+                    result = OpenXrApi::xrGetVisibilityMaskKHR(
+                        session, viewConfigurationType, viewIndex, visibilityMaskType, visibilityMask);
                 }
-
-                result = OpenXrApi::xrGetVisibilityMaskKHR(
-                    session, viewConfigurationType, viewIndex, visibilityMaskType, visibilityMask);
             }
 
             return result;
@@ -1632,6 +1665,7 @@ namespace openxr_api_layer {
         void initializeEyeTrackingFB(XrSession session) {
             XrEyeTrackerCreateInfoFB createInfo{XR_TYPE_EYE_TRACKER_CREATE_INFO_FB};
             CHECK_XRCMD(OpenXrApi::xrCreateEyeTrackerFB(session, &createInfo, &m_eyeTrackerFB));
+            TraceLoggingWrite(g_traceProvider, "EyeTrackerFB", TLXArg(m_eyeTrackerFB, "Handle"));
         }
 
         void initializeEyeGazeInteraction(XrSession session) {
@@ -1656,6 +1690,12 @@ namespace openxr_api_layer {
             actionSpaceCreateInfo.subactionPath = XR_NULL_PATH;
             actionSpaceCreateInfo.poseInActionSpace = Pose::Identity();
             CHECK_XRCMD(OpenXrApi::xrCreateActionSpace(session, &actionSpaceCreateInfo, &m_eyeSpace));
+
+            TraceLoggingWrite(g_traceProvider,
+                              "EyeGazeInteraction",
+                              TLXArg(m_eyeTrackerActionSet, "ActionSet"),
+                              TLXArg(m_eyeGazeAction, "Action"),
+                              TLXArg(m_eyeSpace, "ActionSpace"));
         }
 
         bool getSimulatedTracking(XrTime time, bool getStateOnly, XrVector3f& unitVector) {
@@ -1685,18 +1725,26 @@ namespace openxr_api_layer {
 
             XrEyeGazesFB eyeGaze{XR_TYPE_EYE_GAZES_FB};
             CHECK_XRCMD(OpenXrApi::xrGetEyeGazesFB(m_eyeTrackerFB, &eyeGazeInfo, &eyeGaze));
+            TraceLoggingWrite(g_traceProvider,
+                              "EyeTrackerFB",
+                              TLArg(!!eyeGaze.gaze[xr::StereoView::Left].isValid, "LeftValid"),
+                              TLArg(eyeGaze.gaze[xr::StereoView::Left].gazeConfidence, "LeftConfidence"),
+                              TLArg(!!eyeGaze.gaze[xr::StereoView::Right].isValid, "RightValid"),
+                              TLArg(eyeGaze.gaze[xr::StereoView::Right].gazeConfidence, "RightConfidence"));
 
-            if (!(eyeGaze.gaze[0].isValid && eyeGaze.gaze[1].isValid)) {
+            if (!(eyeGaze.gaze[xr::StereoView::Left].isValid && eyeGaze.gaze[xr::StereoView::Right].isValid)) {
                 return false;
             }
 
-            if (!(eyeGaze.gaze[0].gazeConfidence > 0.5f && eyeGaze.gaze[1].gazeConfidence > 0.5f)) {
+            if (!(eyeGaze.gaze[xr::StereoView::Left].gazeConfidence > 0.5f &&
+                  eyeGaze.gaze[xr::StereoView::Right].gazeConfidence > 0.5f)) {
                 return false;
             }
 
             if (!getStateOnly) {
                 // Average the poses from both eyes.
-                const auto gaze = LoadXrPose(Pose::Slerp(eyeGaze.gaze[0].gazePose, eyeGaze.gaze[1].gazePose, 0.5f));
+                const auto gaze = LoadXrPose(Pose::Slerp(
+                    eyeGaze.gaze[xr::StereoView::Left].gazePose, eyeGaze.gaze[xr::StereoView::Right].gazePose, 0.5f));
                 const auto gazeProjectedPoint =
                     DirectX::XMVector3Transform(DirectX::XMVectorSet(0.f, 0.f, 1.f, 1.f), gaze);
 
@@ -1712,6 +1760,7 @@ namespace openxr_api_layer {
             XrActionStateGetInfo getInfo{XR_TYPE_ACTION_STATE_GET_INFO, nullptr};
             getInfo.action = m_eyeGazeAction;
             CHECK_XRCMD(OpenXrApi::xrGetActionStatePose(m_session, &getInfo, &actionStatePose));
+            TraceLoggingWrite(g_traceProvider, "EyeGazeInteraction", TLArg(!!actionStatePose.isActive, "Active"));
 
             if (!actionStatePose.isActive) {
                 return false;
@@ -1719,6 +1768,7 @@ namespace openxr_api_layer {
 
             XrSpaceLocation location{XR_TYPE_SPACE_LOCATION, nullptr};
             CHECK_XRCMD(OpenXrApi::xrLocateSpace(m_eyeSpace, m_viewSpace, time, &location));
+            TraceLoggingWrite(g_traceProvider, "EyeGazeInteraction", TLArg(location.locationFlags, "LocationFlags"));
 
             if (!Pose::IsPoseValid(location.locationFlags)) {
                 return false;
@@ -1753,7 +1803,7 @@ namespace openxr_api_layer {
             }
 
             TraceLoggingWrite(g_traceProvider,
-                              "xrLocateViews_EyeGaze",
+                              "EyeGaze",
                               TLArg(result, "Valid"),
                               TLArg(xr::ToString(unitVector).c_str(), "GazeUnitVector"));
 
@@ -2240,9 +2290,17 @@ namespace openxr_api_layer {
                 }
             }
 
+            OpenXrApi::xrDestroySpace(viewSpace);
+
             for (uint32_t eye = 0; eye < xr::StereoView::Count; eye++) {
                 m_cachedEyeFov[eye] = view[eye].fov;
                 m_cachedEyePoses[eye] = view[eye].pose;
+
+                TraceLoggingWrite(g_traceProvider,
+                                  "CacheStereoView",
+                                  TLArg(eye, "ViewIndex"),
+                                  TLArg(xr::ToString(m_cachedEyePoses[eye]).c_str(), "Pose"),
+                                  TLArg(xr::ToString(m_cachedEyeFov[eye]).c_str(), "Fov"));
             }
         }
 
