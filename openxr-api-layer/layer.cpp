@@ -1768,6 +1768,9 @@ namespace openxr_api_layer {
             XrSwapchain fullFovSwapchain[xr::StereoView::Count]{XR_NULL_HANDLE, XR_NULL_HANDLE};
             ComPtr<ID3D11Texture2D> flatImage[xr::QuadView::Count];
             ComPtr<ID3D11Texture2D> sharpenedImage[xr::StereoView::Count];
+
+            std::vector<ID3D11Texture2D*> images;
+            std::vector<ID3D11Texture2D*> fullFovSwapchainImages[xr::StereoView::Count];
         };
 
         void initializeEyeTrackingFB(XrSession session) {
@@ -1931,6 +1934,30 @@ namespace openxr_api_layer {
                 initializeCompositionResources(m_applicationDevice.Get());
             }
 
+            const auto populateSwapchainImagesCache = [&](std::vector<ID3D11Texture2D*>& images,
+                                                          XrSwapchain swapchain) {
+                if (!images.empty()) {
+                    return;
+                }
+
+                TraceLocalActivity(local);
+                TraceLoggingWriteStart(
+                    local, "xrEndFrame_GatherInputOutput_PopulateImagesCache", TLXArg(swapchain, "Swapchain"));
+                uint32_t count;
+                CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(swapchain, 0, &count, nullptr));
+                std::vector<XrSwapchainImageD3D11KHR> d3d11Images(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
+                CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(
+                    swapchain, count, &count, reinterpret_cast<XrSwapchainImageBaseHeader*>(d3d11Images.data())));
+                for (uint32_t i = 0; i < count; i++) {
+                    TraceLoggingWriteTagged(local,
+                                            "xrEndFrame_GatherInputOutput_PopulateImagesCache",
+                                            TLArg(i, "Index"),
+                                            TLPArg(d3d11Images[i].texture, "Texture"));
+                    images.push_back(d3d11Images[i].texture);
+                }
+                TraceLoggingWriteStop(local, "xrEndFrame_GatherInputOutput_PopulateImagesCache");
+            };
+
             ID3D11Texture2D* sourceImage;
             ID3D11Texture2D* sourceFocusImage;
             ID3D11Texture2D* destinationImage;
@@ -1939,40 +1966,30 @@ namespace openxr_api_layer {
                 TraceLoggingWriteStart(local, "xrEndFrame_GatherInputOutput");
 
                 // Grab the input textures.
-                const auto getSourceImage = [&](const XrCompositionLayerProjectionView& view, Swapchain& swapchain) {
-                    uint32_t count;
-                    CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(view.subImage.swapchain, 0, &count, nullptr));
-                    std::vector<XrSwapchainImageD3D11KHR> images(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
-                    CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(
-                        view.subImage.swapchain,
-                        count,
-                        &count,
-                        reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())));
-                    return images[swapchain.lastReleasedIndex].texture;
-                };
-                sourceImage = getSourceImage(stereoView, swapchainForStereoView);
-                sourceFocusImage = getSourceImage(focusView, swapchainForFocusView);
+                populateSwapchainImagesCache(swapchainForStereoView.images, stereoView.subImage.swapchain);
+                sourceImage = swapchainForStereoView.images[swapchainForStereoView.lastReleasedIndex];
+                populateSwapchainImagesCache(swapchainForFocusView.images, focusView.subImage.swapchain);
+                sourceFocusImage = swapchainForFocusView.images[swapchainForFocusView.lastReleasedIndex];
 
                 // Grab the output texture.
                 {
+                    TraceLoggingWriteTagged(local,
+                                            "xrEndFrame_GatherInputOutput_AcquireOutput",
+                                            TLXArg(swapchainForStereoView.fullFovSwapchain[viewIndex], "Swapchain"));
                     uint32_t acquiredImageIndex;
                     CHECK_XRCMD(OpenXrApi::xrAcquireSwapchainImage(
                         swapchainForStereoView.fullFovSwapchain[viewIndex], nullptr, &acquiredImageIndex));
                     XrSwapchainImageWaitInfo waitInfo{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
                     waitInfo.timeout = 10000000000;
+                    TraceLoggingWriteTagged(local,
+                                            "xrEndFrame_GatherInputOutput_WaitOutput",
+                                            TLXArg(swapchainForStereoView.fullFovSwapchain[viewIndex], "Swapchain"));
                     CHECK_XRCMD(
                         OpenXrApi::xrWaitSwapchainImage(swapchainForStereoView.fullFovSwapchain[viewIndex], &waitInfo));
 
-                    uint32_t count;
-                    CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(
-                        swapchainForStereoView.fullFovSwapchain[viewIndex], 0, &count, nullptr));
-                    std::vector<XrSwapchainImageD3D11KHR> images(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
-                    CHECK_XRCMD(OpenXrApi::xrEnumerateSwapchainImages(
-                        swapchainForStereoView.fullFovSwapchain[viewIndex],
-                        count,
-                        &count,
-                        reinterpret_cast<XrSwapchainImageBaseHeader*>(images.data())));
-                    destinationImage = images[acquiredImageIndex].texture;
+                    populateSwapchainImagesCache(swapchainForStereoView.fullFovSwapchainImages[viewIndex],
+                                                 swapchainForStereoView.fullFovSwapchain[viewIndex]);
+                    destinationImage = swapchainForStereoView.fullFovSwapchainImages[viewIndex][acquiredImageIndex];
                 }
 
                 TraceLoggingWriteStop(local, "xrEndFrame_GatherInputOutput");
