@@ -598,7 +598,7 @@ namespace openxr_api_layer {
                 // Initialize the minimal resources for the rendering code.
                 const XrBaseInStructure* entry = reinterpret_cast<const XrBaseInStructure*>(createInfo->next);
                 while (entry) {
-                    if (entry->type == XR_TYPE_GRAPHICS_BINDING_D3D11_KHR) {
+                    if (m_requestedD3D11 && entry->type == XR_TYPE_GRAPHICS_BINDING_D3D11_KHR) {
                         const XrGraphicsBindingD3D11KHR* d3dBindings =
                             reinterpret_cast<const XrGraphicsBindingD3D11KHR*>(entry);
                         initializeDeviceContext(d3dBindings->device);
