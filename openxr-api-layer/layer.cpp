@@ -130,6 +130,10 @@ namespace openxr_api_layer {
                 }
             }
 
+            if (!requestedQuadViews) {
+                m_requestedFoveatedRendering = false;
+            }
+
             // We only support D3D11 at the moment.
             m_bypassApiLayer = !(requestedQuadViews && m_requestedD3D11);
             if (m_bypassApiLayer) {
@@ -148,39 +152,11 @@ namespace openxr_api_layer {
             TraceLoggingWrite(g_traceProvider, "xrCreateInstance", TLArg(runtimeName.c_str(), "RuntimeName"));
             Log(fmt::format("Using OpenXR runtime: {}\n", runtimeName));
 
-            // Parse the configuration. Load the file shipped with the layer first, followed by the file the users may
-            // edit.
-            LoadConfiguration(dllHome / "settings.cfg");
-            LoadConfiguration(localAppData / "settings.cfg");
-
             // Platform-specific quirks.
             m_needDeferredSwapchainReleaseQuirk = runtimeName.find("Varjo") != std::string::npos;
-            if (m_needDeferredSwapchainReleaseQuirk && m_useTurboMode) {
-                Log("Denying Turbo Mode due to deferred swapchain release!\n");
-                m_useTurboMode = false;
-            }
 
             // Game-specific quirks.
             m_needFocusFovCorrectionQuirk = GetApplicationName() == "DCS World";
-
-            TraceLoggingWrite(g_traceProvider,
-                              "xrCreateInstance",
-                              TLArg(m_peripheralPixelDensity, "PeripheralResolutionFactor"),
-                              TLArg(m_focusPixelDensity, "FocusResolutionFactor"),
-                              TLArg(m_horizontalFovSection[0], "FixedHorizontalSection"),
-                              TLArg(m_verticalFovSection[0], "FixedVerticalSection"),
-                              TLArg(m_horizontalFovSection[1], "FoveatedHorizontalSection"),
-                              TLArg(m_verticalFovSection[1], "FoveatedVerticalSection"),
-                              TLArg(m_horizontalFocusOffset, "HorizontalFocusOffset"),
-                              TLArg(m_verticalFocusOffset, "VerticalFocusOffset"),
-                              TLArg(m_horizontalFocusWideningMultiplier, "HorizontalFocusWideningMultiplier"),
-                              TLArg(m_verticalFocusWideningMultiplier, "VerticalFocusWideningMultiplier"),
-                              TLArg(m_focusWideningDeadzone, "FocusWideningDeadzone"),
-                              TLArg(m_preferFoveatedRendering, "PreferFoveatedRendering"),
-                              TLArg(m_forceNoEyeTracking, "ForceNoEyeTracking"),
-                              TLArg(m_smoothenFocusViewEdges, "SmoothenEdges"),
-                              TLArg(m_sharpenFocusView, "SharpenFocusView"),
-                              TLArg(m_useTurboMode, "TurboMode"));
 
             return XR_SUCCESS;
         }
@@ -199,44 +175,71 @@ namespace openxr_api_layer {
             const XrResult result = OpenXrApi::xrGetSystem(instance, getInfo, systemId);
 
             if (XR_SUCCEEDED(result) && getInfo->formFactor == XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY) {
-                // Check if the system supports eye tracking.
-                XrSystemEyeGazeInteractionPropertiesEXT eyeGazeInteractionProperties{
-                    XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT};
-                XrSystemEyeTrackingPropertiesFB eyeTrackingProperties{XR_TYPE_SYSTEM_EYE_TRACKING_PROPERTIES_FB,
-                                                                      &eyeGazeInteractionProperties};
-                XrSystemProperties systemProperties{XR_TYPE_SYSTEM_PROPERTIES};
-                systemProperties.next = &eyeTrackingProperties;
-                CHECK_XRCMD(OpenXrApi::xrGetSystemProperties(instance, *systemId, &systemProperties));
-                TraceLoggingWrite(
-                    g_traceProvider,
-                    "xrGetSystem",
-                    TLArg(systemProperties.systemName, "SystemName"),
-                    TLArg(eyeGazeInteractionProperties.supportsEyeGazeInteraction, "SupportsEyeGazeInteraction"),
-                    TLArg(eyeTrackingProperties.supportsEyeTracking, "SupportsEyeTracking"));
-
-                m_trackerType = Tracker::None;
-                if (!m_forceNoEyeTracking) {
-                    if (m_debugSimulateTracking) {
-                        m_trackerType = Tracker::SimulatedTracking;
-                    } else if (eyeGazeInteractionProperties.supportsEyeGazeInteraction) {
-                        // Prefer the eye gaze interaction extension over the social eye tracking extension.
-                        m_trackerType = Tracker::EyeGazeInteraction;
-                    } else if (eyeTrackingProperties.supportsEyeTracking) {
-                        // Last resort if the "social eye tracking".
-                        m_trackerType = Tracker::EyeTrackerFB;
-                    }
-                }
-
-                static bool wasSystemLogged = false;
-                if (!wasSystemLogged) {
+                if (*systemId != m_systemId) {
+                    // Check if the system supports eye tracking.
+                    XrSystemEyeGazeInteractionPropertiesEXT eyeGazeInteractionProperties{
+                        XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT};
+                    XrSystemEyeTrackingPropertiesFB eyeTrackingProperties{XR_TYPE_SYSTEM_EYE_TRACKING_PROPERTIES_FB,
+                                                                          &eyeGazeInteractionProperties};
                     XrSystemProperties systemProperties{XR_TYPE_SYSTEM_PROPERTIES};
+                    systemProperties.next = &eyeTrackingProperties;
                     CHECK_XRCMD(OpenXrApi::xrGetSystemProperties(instance, *systemId, &systemProperties));
-                    TraceLoggingWrite(g_traceProvider, "xrGetSystem", TLArg(systemProperties.systemName, "SystemName"));
+                    m_systemName = systemProperties.systemName;
+                    TraceLoggingWrite(
+                        g_traceProvider,
+                        "xrGetSystem",
+                        TLArg(systemProperties.systemName, "SystemName"),
+                        TLArg(eyeGazeInteractionProperties.supportsEyeGazeInteraction, "SupportsEyeGazeInteraction"),
+                        TLArg(eyeTrackingProperties.supportsEyeTracking, "SupportsEyeTracking"));
                     Log(fmt::format("Using OpenXR system: {}\n", systemProperties.systemName));
+
+                    // Parse the configuration. Load the file shipped with the layer first, followed by the file the
+                    // users may edit.
+                    LoadConfiguration(dllHome / "settings.cfg");
+                    LoadConfiguration(localAppData / "settings.cfg");
+
+                    if (m_needDeferredSwapchainReleaseQuirk && m_useTurboMode) {
+                        Log("Denying Turbo Mode due to deferred swapchain release!\n");
+                        m_useTurboMode = false;
+                    }
+
+                    TraceLoggingWrite(g_traceProvider,
+                                      "xrGetSystem",
+                                      TLArg(m_peripheralPixelDensity, "PeripheralResolutionFactor"),
+                                      TLArg(m_focusPixelDensity, "FocusResolutionFactor"),
+                                      TLArg(m_horizontalFovSection[0], "FixedHorizontalSection"),
+                                      TLArg(m_verticalFovSection[0], "FixedVerticalSection"),
+                                      TLArg(m_horizontalFovSection[1], "FoveatedHorizontalSection"),
+                                      TLArg(m_verticalFovSection[1], "FoveatedVerticalSection"),
+                                      TLArg(m_horizontalFocusOffset, "HorizontalFocusOffset"),
+                                      TLArg(m_verticalFocusOffset, "VerticalFocusOffset"),
+                                      TLArg(m_horizontalFocusWideningMultiplier, "HorizontalFocusWideningMultiplier"),
+                                      TLArg(m_verticalFocusWideningMultiplier, "VerticalFocusWideningMultiplier"),
+                                      TLArg(m_focusWideningDeadzone, "FocusWideningDeadzone"),
+                                      TLArg(m_preferFoveatedRendering, "PreferFoveatedRendering"),
+                                      TLArg(m_forceNoEyeTracking, "ForceNoEyeTracking"),
+                                      TLArg(m_smoothenFocusViewEdges, "SmoothenEdges"),
+                                      TLArg(m_sharpenFocusView, "SharpenFocusView"),
+                                      TLArg(m_useTurboMode, "TurboMode"));
+
+                    m_trackerType = Tracker::None;
+                    if (!m_forceNoEyeTracking) {
+                        if (m_debugSimulateTracking) {
+                            m_trackerType = Tracker::SimulatedTracking;
+                        } else if (eyeGazeInteractionProperties.supportsEyeGazeInteraction) {
+                            // Prefer the eye gaze interaction extension over the social eye tracking extension.
+                            m_trackerType = Tracker::EyeGazeInteraction;
+                        } else if (eyeTrackingProperties.supportsEyeTracking) {
+                            // Last resort if the "social eye tracking".
+                            m_trackerType = Tracker::EyeTrackerFB;
+                        }
+                    }
+
                     Log(fmt::format("Eye tracking is {}\n",
                                     m_trackerType != Tracker::None ? "supported" : "not supported"));
-                    wasSystemLogged = true;
                 }
+
+                m_systemId = *systemId;
             }
 
             TraceLoggingWrite(g_traceProvider, "xrGetSystem", TLArg((int)*systemId, "SystemId"));
@@ -256,7 +259,7 @@ namespace openxr_api_layer {
             const XrResult result = OpenXrApi::xrGetSystemProperties(instance, systemId, properties);
 
             if (XR_SUCCEEDED(result)) {
-                if (m_requestedFoveatedRendering) {
+                if (isSystemHandled(systemId) && m_requestedFoveatedRendering) {
                     XrSystemFoveatedRenderingPropertiesVARJO* foveatedProperties =
                         reinterpret_cast<XrSystemFoveatedRenderingPropertiesVARJO*>(properties->next);
                     while (foveatedProperties) {
@@ -292,23 +295,31 @@ namespace openxr_api_layer {
                               TLArg(viewConfigurationTypeCapacityInput, "ViewConfigurationTypeCapacityInput"));
 
             XrResult result = XR_ERROR_RUNTIME_FAILURE;
-            if (viewConfigurationTypeCapacityInput) {
-                result = OpenXrApi::xrEnumerateViewConfigurations(instance,
-                                                                  systemId,
-                                                                  viewConfigurationTypeCapacityInput - 1,
-                                                                  viewConfigurationTypeCountOutput,
-                                                                  viewConfigurationTypes + 1);
-                if (XR_SUCCEEDED(result)) {
-                    // Prepend (since we prefer quad views).
-                    viewConfigurationTypes[0] = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO;
-                    (*viewConfigurationTypeCountOutput)++;
+            if (isSystemHandled(systemId)) {
+                if (viewConfigurationTypeCapacityInput) {
+                    result = OpenXrApi::xrEnumerateViewConfigurations(instance,
+                                                                      systemId,
+                                                                      viewConfigurationTypeCapacityInput - 1,
+                                                                      viewConfigurationTypeCountOutput,
+                                                                      viewConfigurationTypes + 1);
+                    if (XR_SUCCEEDED(result)) {
+                        // Prepend (since we prefer quad views).
+                        viewConfigurationTypes[0] = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO;
+                        (*viewConfigurationTypeCountOutput)++;
+                    }
+                } else {
+                    result = OpenXrApi::xrEnumerateViewConfigurations(
+                        instance, systemId, 0, viewConfigurationTypeCountOutput, nullptr);
+                    if (XR_SUCCEEDED(result)) {
+                        (*viewConfigurationTypeCountOutput)++;
+                    }
                 }
             } else {
-                result = OpenXrApi::xrEnumerateViewConfigurations(
-                    instance, systemId, 0, viewConfigurationTypeCountOutput, nullptr);
-                if (XR_SUCCEEDED(result)) {
-                    (*viewConfigurationTypeCountOutput)++;
-                }
+                result = OpenXrApi::xrEnumerateViewConfigurations(instance,
+                                                                  systemId,
+                                                                  viewConfigurationTypeCapacityInput,
+                                                                  viewConfigurationTypeCountOutput,
+                                                                  viewConfigurationTypes);
             }
 
             if (XR_SUCCEEDED(result)) {
@@ -343,7 +354,7 @@ namespace openxr_api_layer {
                               TLArg(xr::ToCString(viewConfigurationType), "ViewConfigurationType"));
 
             XrResult result = XR_ERROR_RUNTIME_FAILURE;
-            if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+            if (isSystemHandled(systemId) && viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
                 if (viewCapacityInput) {
                     XrViewConfigurationView stereoViews[xr::StereoView::Count]{{XR_TYPE_VIEW_CONFIGURATION_VIEW},
                                                                                {XR_TYPE_VIEW_CONFIGURATION_VIEW}};
@@ -513,7 +524,7 @@ namespace openxr_api_layer {
                               TLArg(environmentBlendModeCapacityInput, "EnvironmentBlendModeCapacityInput"));
 
             // We will implement quad views on top of stereo.
-            if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+            if (isSystemHandled(systemId) && viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
                 viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
             }
 
@@ -554,7 +565,7 @@ namespace openxr_api_layer {
 
             // We will implement quad views on top of stereo.
             const XrViewConfigurationType originalViewConfigurationType = viewConfigurationType;
-            if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+            if (isSystemHandled(systemId) && viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
                 viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
             }
 
@@ -595,39 +606,40 @@ namespace openxr_api_layer {
             if (XR_SUCCEEDED(result)) {
                 TraceLoggingWrite(g_traceProvider, "xrCreateSession", TLXArg(*session, "Session"));
 
-                // Initialize the minimal resources for the rendering code.
-                const XrBaseInStructure* entry = reinterpret_cast<const XrBaseInStructure*>(createInfo->next);
-                while (entry) {
-                    if (m_requestedD3D11 && entry->type == XR_TYPE_GRAPHICS_BINDING_D3D11_KHR) {
-                        const XrGraphicsBindingD3D11KHR* d3dBindings =
-                            reinterpret_cast<const XrGraphicsBindingD3D11KHR*>(entry);
-                        initializeDeviceContext(d3dBindings->device);
-                        m_isSupportedGraphicsApi = true;
-                        break;
-                    }
-                    entry = entry->next;
-                }
-
-                // Initialize the resources for the eye tracker.
-                if (m_trackerType != Tracker::None) {
-                    switch (m_trackerType) {
-                    case Tracker::EyeTrackerFB:
-                        initializeEyeTrackingFB(*session);
-                        break;
-
-                    case Tracker::EyeGazeInteraction:
-                        initializeEyeGazeInteraction(*session);
-                        break;
+                if (isSystemHandled(createInfo->systemId)) {
+                    // Initialize the minimal resources for the rendering code.
+                    const XrBaseInStructure* entry = reinterpret_cast<const XrBaseInStructure*>(createInfo->next);
+                    while (entry) {
+                        if (m_requestedD3D11 && entry->type == XR_TYPE_GRAPHICS_BINDING_D3D11_KHR) {
+                            const XrGraphicsBindingD3D11KHR* d3dBindings =
+                                reinterpret_cast<const XrGraphicsBindingD3D11KHR*>(entry);
+                            initializeDeviceContext(d3dBindings->device);
+                            m_isSupportedGraphicsApi = true;
+                            break;
+                        }
+                        entry = entry->next;
                     }
 
-                    XrReferenceSpaceCreateInfo spaceCreateInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
-                    spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
-                    spaceCreateInfo.poseInReferenceSpace = Pose::Identity();
-                    CHECK_XRCMD(OpenXrApi::xrCreateReferenceSpace(*session, &spaceCreateInfo, &m_viewSpace));
-                }
+                    // Initialize the resources for the eye tracker.
+                    if (m_trackerType != Tracker::None) {
+                        switch (m_trackerType) {
+                        case Tracker::EyeTrackerFB:
+                            initializeEyeTrackingFB(*session);
+                            break;
 
-                m_systemId = createInfo->systemId;
-                m_session = *session;
+                        case Tracker::EyeGazeInteraction:
+                            initializeEyeGazeInteraction(*session);
+                            break;
+                        }
+
+                        XrReferenceSpaceCreateInfo spaceCreateInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+                        spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+                        spaceCreateInfo.poseInReferenceSpace = Pose::Identity();
+                        CHECK_XRCMD(OpenXrApi::xrCreateReferenceSpace(*session, &spaceCreateInfo, &m_viewSpace));
+                    }
+
+                    m_session = *session;
+                }
             }
 
             return result;
@@ -638,7 +650,7 @@ namespace openxr_api_layer {
             TraceLoggingWrite(g_traceProvider, "xrDestroySession", TLXArg(session, "Session"));
 
             // Wait for deferred frames to finish before teardown.
-            if (m_asyncWaitPromise.valid()) {
+            if (isSessionHandled(session) && m_asyncWaitPromise.valid()) {
                 TraceLocalActivity(local);
 
                 TraceLoggingWriteStart(local, "xrDestroySession_AsyncWaitNow");
@@ -651,29 +663,33 @@ namespace openxr_api_layer {
             const XrResult result = OpenXrApi::xrDestroySession(session);
 
             if (XR_SUCCEEDED(result)) {
-                for (uint32_t i = 0; i < std::size(m_compositionTimer); i++) {
-                    m_compositionTimer[i].reset();
-                }
-                for (uint32_t i = 0; i < std::size(m_appFrameGpuTimer); i++) {
-                    m_appFrameGpuTimer[i].reset();
-                }
-                m_appFrameCpuTimer.reset();
-                m_appRenderCpuTimer.reset();
-                m_layerContextState.Reset();
-                m_linearClampSampler.Reset();
-                m_noDepthRasterizer.Reset();
-                m_projectionVSConstants.Reset();
-                m_projectionPSConstants.Reset();
-                m_projectionVS.Reset();
-                m_projectionPS.Reset();
-                m_sharpeningCSConstants.Reset();
-                m_sharpeningCS.Reset();
+                if (isSessionHandled(session)) {
+                    for (uint32_t i = 0; i < std::size(m_compositionTimer); i++) {
+                        m_compositionTimer[i].reset();
+                    }
+                    for (uint32_t i = 0; i < std::size(m_appFrameGpuTimer); i++) {
+                        m_appFrameGpuTimer[i].reset();
+                    }
+                    m_appFrameCpuTimer.reset();
+                    m_appRenderCpuTimer.reset();
+                    m_layerContextState.Reset();
+                    m_linearClampSampler.Reset();
+                    m_noDepthRasterizer.Reset();
+                    m_projectionVSConstants.Reset();
+                    m_projectionPSConstants.Reset();
+                    m_projectionVS.Reset();
+                    m_projectionPS.Reset();
+                    m_sharpeningCSConstants.Reset();
+                    m_sharpeningCS.Reset();
 
-                m_applicationDevice.Reset();
-                m_renderContext.Reset();
+                    m_applicationDevice.Reset();
+                    m_renderContext.Reset();
 
-                m_gazeSpaces.clear();
-                m_swapchains.clear();
+                    m_gazeSpaces.clear();
+                    m_swapchains.clear();
+
+                    m_session = XR_NULL_HANDLE;
+                }
             }
 
             return result;
@@ -693,7 +709,8 @@ namespace openxr_api_layer {
 
             // We will implement quad views on top of stereo.
             XrSessionBeginInfo chainBeginInfo = *beginInfo;
-            if (beginInfo->primaryViewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+            if (isSessionHandled(session) &&
+                beginInfo->primaryViewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
                 // The concept of enumerating view configuration types and graphics API are decoupled.
                 // We try to fail as gracefully as possible when we cannot support the configuration.
                 if (!m_isSupportedGraphicsApi) {
@@ -709,21 +726,23 @@ namespace openxr_api_layer {
             const XrResult result = OpenXrApi::xrBeginSession(session, &chainBeginInfo);
 
             if (XR_SUCCEEDED(result)) {
-                // Make sure we have the prerequisite data to compute the views in subsequent calls.
-                populateFovTables(m_systemId, session);
+                if (isSessionHandled(session)) {
+                    // Make sure we have the prerequisite data to compute the views in subsequent calls.
+                    populateFovTables(m_systemId, session);
 
-                if (m_useQuadViews) {
-                    if (m_smoothenFocusViewEdges) {
-                        Log(fmt::format("Edge smoothing: {:.2f}\n", m_smoothenFocusViewEdges));
-                    } else {
-                        Log("Edge smoothing: Disabled\n");
+                    if (m_useQuadViews) {
+                        if (m_smoothenFocusViewEdges) {
+                            Log(fmt::format("Edge smoothing: {:.2f}\n", m_smoothenFocusViewEdges));
+                        } else {
+                            Log("Edge smoothing: Disabled\n");
+                        }
+                        if (m_sharpenFocusView) {
+                            Log(fmt::format("Sharpening: {:.2f}\n", m_sharpenFocusView));
+                        } else {
+                            Log("Sharpening: Disabled\n");
+                        }
+                        Log(fmt::format("Turbo: {}\n", m_useTurboMode ? "Enabled" : "Disabled"));
                     }
-                    if (m_sharpenFocusView) {
-                        Log(fmt::format("Sharpening: {:.2f}\n", m_sharpenFocusView));
-                    } else {
-                        Log("Sharpening: Disabled\n");
-                    }
-                    Log(fmt::format("Turbo: {}\n", m_useTurboMode ? "Enabled" : "Disabled"));
                 }
             }
 
@@ -745,7 +764,7 @@ namespace openxr_api_layer {
             XrSessionActionSetsAttachInfo chainAttachInfo = *attachInfo;
             std::vector<XrActionSet> actionSets(chainAttachInfo.actionSets,
                                                 chainAttachInfo.actionSets + chainAttachInfo.countActionSets);
-            if (m_eyeTrackerActionSet != XR_NULL_HANDLE) {
+            if (isSessionHandled(session) && m_eyeTrackerActionSet != XR_NULL_HANDLE) {
                 // Suggest the bindings for the eye tracker. We do this last in order to override previous bindings the
                 // application may have done.
                 XrActionSuggestedBinding binding;
@@ -795,151 +814,163 @@ namespace openxr_api_layer {
                               TLArg(viewCapacityInput, "ViewCapacityInput"));
 
             XrResult result = XR_ERROR_RUNTIME_FAILURE;
-            if (viewLocateInfo->viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
-                if (m_useQuadViews) {
-                    XrViewLocateInfo chainViewLocateInfo = *viewLocateInfo;
-                    chainViewLocateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+            if (isSessionHandled(session)) {
+                if (viewLocateInfo->viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+                    if (m_useQuadViews) {
+                        XrViewLocateInfo chainViewLocateInfo = *viewLocateInfo;
+                        chainViewLocateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 
-                    if (viewCapacityInput) {
-                        if (viewCapacityInput >= xr::QuadView::Count) {
-                            result = OpenXrApi::xrLocateViews(session,
-                                                              &chainViewLocateInfo,
-                                                              viewState,
-                                                              xr::StereoView::Count,
-                                                              viewCountOutput,
-                                                              views);
-                        } else {
-                            result = XR_ERROR_SIZE_INSUFFICIENT;
-                        }
-
-                        if (XR_SUCCEEDED(result)) {
-                            *viewCountOutput = xr::QuadView::Count;
-
-                            for (uint32_t i = 0; i < *viewCountOutput; i++) {
-                                if (views[i].type != XR_TYPE_VIEW) {
-                                    return XR_ERROR_VALIDATION_FAILURE;
-                                }
+                        if (viewCapacityInput) {
+                            if (viewCapacityInput >= xr::QuadView::Count) {
+                                result = OpenXrApi::xrLocateViews(session,
+                                                                  &chainViewLocateInfo,
+                                                                  viewState,
+                                                                  xr::StereoView::Count,
+                                                                  viewCountOutput,
+                                                                  views);
+                            } else {
+                                result = XR_ERROR_SIZE_INSUFFICIENT;
                             }
 
-                            if (viewState->viewStateFlags &
-                                (XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_VALID_BIT)) {
-                                // Override default to specify whether foveated rendering is desired when the
-                                // application does not specify.
-                                bool foveatedRenderingActive =
-                                    m_trackerType != Tracker::None && m_preferFoveatedRendering;
+                            if (XR_SUCCEEDED(result)) {
+                                *viewCountOutput = xr::QuadView::Count;
 
-                                if (m_requestedFoveatedRendering) {
-                                    const XrViewLocateFoveatedRenderingVARJO* foveatedLocate =
-                                        reinterpret_cast<const XrViewLocateFoveatedRenderingVARJO*>(
-                                            viewLocateInfo->next);
-                                    while (foveatedLocate) {
-                                        if (foveatedLocate->type == XR_TYPE_VIEW_LOCATE_FOVEATED_RENDERING_VARJO) {
-                                            foveatedRenderingActive = foveatedLocate->foveatedRenderingActive;
-                                            break;
+                                for (uint32_t i = 0; i < *viewCountOutput; i++) {
+                                    if (views[i].type != XR_TYPE_VIEW) {
+                                        return XR_ERROR_VALIDATION_FAILURE;
+                                    }
+                                }
+
+                                if (viewState->viewStateFlags &
+                                    (XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_VALID_BIT)) {
+                                    // Override default to specify whether foveated rendering is desired when the
+                                    // application does not specify.
+                                    bool foveatedRenderingActive =
+                                        m_trackerType != Tracker::None && m_preferFoveatedRendering;
+
+                                    if (m_requestedFoveatedRendering) {
+                                        const XrViewLocateFoveatedRenderingVARJO* foveatedLocate =
+                                            reinterpret_cast<const XrViewLocateFoveatedRenderingVARJO*>(
+                                                viewLocateInfo->next);
+                                        while (foveatedLocate) {
+                                            if (foveatedLocate->type == XR_TYPE_VIEW_LOCATE_FOVEATED_RENDERING_VARJO) {
+                                                foveatedRenderingActive = foveatedLocate->foveatedRenderingActive;
+                                                break;
+                                            }
+                                            foveatedLocate =
+                                                reinterpret_cast<const XrViewLocateFoveatedRenderingVARJO*>(
+                                                    foveatedLocate->next);
                                         }
-                                        foveatedLocate = reinterpret_cast<const XrViewLocateFoveatedRenderingVARJO*>(
-                                            foveatedLocate->next);
-                                    }
 
-                                    TraceLoggingWrite(g_traceProvider,
-                                                      "xrLocateViews",
-                                                      TLArg(foveatedRenderingActive, "FoveatedRenderingActive"));
-                                }
-
-                                // Query the eye tracker if needed.
-                                bool isGazeValid = false;
-                                XrVector3f gazeUnitVector{};
-                                if (foveatedRenderingActive) {
-                                    isGazeValid = getEyeGaze(
-                                        viewLocateInfo->displayTime, false /* getStateOnly */, gazeUnitVector);
-                                }
-
-                                // Set up the focus view.
-                                for (uint32_t i = xr::StereoView::Count; i < *viewCountOutput; i++) {
-                                    const uint32_t stereoViewIndex = i - xr::StereoView::Count;
-
-                                    views[i].pose = views[stereoViewIndex].pose;
-
-                                    XrView viewForGazeProjection{};
-                                    viewForGazeProjection.pose = m_cachedEyePoses[stereoViewIndex];
-                                    viewForGazeProjection.fov = views[stereoViewIndex].fov;
-                                    XrVector2f projectedGaze;
-                                    if (!isGazeValid ||
-                                        !ProjectPoint(viewForGazeProjection, gazeUnitVector, projectedGaze)) {
-                                        views[i].fov = m_cachedEyeFov[i];
-
-                                    } else {
-                                        // Shift FOV according to the eye gaze.
-                                        // We also widen the FOV when near the edges of the headset to make sure there's
-                                        // enough overlap between the two eyes.
                                         TraceLoggingWrite(g_traceProvider,
                                                           "xrLocateViews",
-                                                          TLArg(i, "ViewIndex"),
-                                                          TLArg(xr::ToString(projectedGaze).c_str(), "ProjectedGaze"));
-                                        m_eyeGaze[stereoViewIndex] = projectedGaze;
-                                        m_eyeGaze[stereoViewIndex] = m_eyeGaze[stereoViewIndex] +
-                                                                     XrVector2f{stereoViewIndex == xr::StereoView::Left
-                                                                                    ? -m_horizontalFocusOffset
-                                                                                    : m_horizontalFocusOffset,
-                                                                                m_verticalFocusOffset};
-                                        const XrVector2f v =
-                                            m_eyeGaze[stereoViewIndex] - m_centerOfFov[stereoViewIndex];
-                                        const float horizontalFovSection =
-                                            m_horizontalFovSection[1] *
-                                            (1.f + (std::clamp(abs(v.x) - m_focusWideningDeadzone, 0.f, 1.f) *
-                                                    m_horizontalFocusWideningMultiplier));
-                                        const float verticalFovSection =
-                                            m_verticalFovSection[1] *
-                                            (1.f + (std::clamp(abs(v.y) - m_focusWideningDeadzone, 0.f, 1.f) *
-                                                    m_verticalFocusWideningMultiplier));
-                                        const XrVector2f min{
-                                            std::clamp(m_eyeGaze[stereoViewIndex].x - horizontalFovSection, -1.f, 1.f),
-                                            std::clamp(m_eyeGaze[stereoViewIndex].y - verticalFovSection, -1.f, 1.f)};
-                                        const XrVector2f max{
-                                            std::clamp(m_eyeGaze[stereoViewIndex].x + horizontalFovSection, -1.f, 1.f),
-                                            std::clamp(m_eyeGaze[stereoViewIndex].y + verticalFovSection, -1.f, 1.f)};
-                                        TraceLoggingWrite(g_traceProvider,
-                                                          "xrLocateViews",
-                                                          TLArg(i, "ViewIndex"),
-                                                          TLArg(xr::ToString(min).c_str(), "FocusTopLeft"),
-                                                          TLArg(xr::ToString(max).c_str(), "FocusBottomRight"));
-                                        views[i].fov =
-                                            xr::math::ComputeBoundingFov(m_cachedEyeFov[stereoViewIndex], min, max);
+                                                          TLArg(foveatedRenderingActive, "FoveatedRenderingActive"));
+                                    }
+
+                                    // Query the eye tracker if needed.
+                                    bool isGazeValid = false;
+                                    XrVector3f gazeUnitVector{};
+                                    if (foveatedRenderingActive) {
+                                        isGazeValid = getEyeGaze(
+                                            viewLocateInfo->displayTime, false /* getStateOnly */, gazeUnitVector);
+                                    }
+
+                                    // Set up the focus view.
+                                    for (uint32_t i = xr::StereoView::Count; i < *viewCountOutput; i++) {
+                                        const uint32_t stereoViewIndex = i - xr::StereoView::Count;
+
+                                        views[i].pose = views[stereoViewIndex].pose;
+
+                                        XrView viewForGazeProjection{};
+                                        viewForGazeProjection.pose = m_cachedEyePoses[stereoViewIndex];
+                                        viewForGazeProjection.fov = views[stereoViewIndex].fov;
+                                        XrVector2f projectedGaze;
+                                        if (!isGazeValid ||
+                                            !ProjectPoint(viewForGazeProjection, gazeUnitVector, projectedGaze)) {
+                                            views[i].fov = m_cachedEyeFov[i];
+
+                                        } else {
+                                            // Shift FOV according to the eye gaze.
+                                            // We also widen the FOV when near the edges of the headset to make sure
+                                            // there's enough overlap between the two eyes.
+                                            TraceLoggingWrite(
+                                                g_traceProvider,
+                                                "xrLocateViews",
+                                                TLArg(i, "ViewIndex"),
+                                                TLArg(xr::ToString(projectedGaze).c_str(), "ProjectedGaze"));
+                                            m_eyeGaze[stereoViewIndex] = projectedGaze;
+                                            m_eyeGaze[stereoViewIndex] =
+                                                m_eyeGaze[stereoViewIndex] +
+                                                XrVector2f{stereoViewIndex == xr::StereoView::Left
+                                                               ? -m_horizontalFocusOffset
+                                                               : m_horizontalFocusOffset,
+                                                           m_verticalFocusOffset};
+                                            const XrVector2f v =
+                                                m_eyeGaze[stereoViewIndex] - m_centerOfFov[stereoViewIndex];
+                                            const float horizontalFovSection =
+                                                m_horizontalFovSection[1] *
+                                                (1.f + (std::clamp(abs(v.x) - m_focusWideningDeadzone, 0.f, 1.f) *
+                                                        m_horizontalFocusWideningMultiplier));
+                                            const float verticalFovSection =
+                                                m_verticalFovSection[1] *
+                                                (1.f + (std::clamp(abs(v.y) - m_focusWideningDeadzone, 0.f, 1.f) *
+                                                        m_verticalFocusWideningMultiplier));
+                                            const XrVector2f min{
+                                                std::clamp(
+                                                    m_eyeGaze[stereoViewIndex].x - horizontalFovSection, -1.f, 1.f),
+                                                std::clamp(
+                                                    m_eyeGaze[stereoViewIndex].y - verticalFovSection, -1.f, 1.f)};
+                                            const XrVector2f max{
+                                                std::clamp(
+                                                    m_eyeGaze[stereoViewIndex].x + horizontalFovSection, -1.f, 1.f),
+                                                std::clamp(
+                                                    m_eyeGaze[stereoViewIndex].y + verticalFovSection, -1.f, 1.f)};
+                                            TraceLoggingWrite(g_traceProvider,
+                                                              "xrLocateViews",
+                                                              TLArg(i, "ViewIndex"),
+                                                              TLArg(xr::ToString(min).c_str(), "FocusTopLeft"),
+                                                              TLArg(xr::ToString(max).c_str(), "FocusBottomRight"));
+                                            views[i].fov =
+                                                xr::math::ComputeBoundingFov(m_cachedEyeFov[stereoViewIndex], min, max);
+                                        }
+                                    }
+
+                                    // Quirk for DCS World: the application does not pass the correct FOV for the focus
+                                    // views in xrEndFrame(). We must keep track of the correct values for each frame.
+                                    if (m_needFocusFovCorrectionQuirk) {
+                                        TraceLocalActivity(local);
+                                        TraceLoggingWriteStart(local, "xrLocateViews_StoreFovForQuirk");
+                                        std::unique_lock lock(m_focusFovMutex);
+
+                                        m_focusFovForDisplayTime.insert_or_assign(
+                                            viewLocateInfo->displayTime,
+                                            std::make_pair(views[xr::QuadView::FocusLeft].fov,
+                                                           views[xr::QuadView::FocusRight].fov));
+                                        TraceLoggingWriteStop(local, "xrLocateViews_StoreFovForQuirk");
                                     }
                                 }
-
-                                // Quirk for DCS World: the application does not pass the correct FOV for the focus
-                                // views in xrEndFrame(). We must keep track of the correct values for each frame.
-                                if (m_needFocusFovCorrectionQuirk) {
-                                    TraceLocalActivity(local);
-                                    TraceLoggingWriteStart(local, "xrLocateViews_StoreFovForQuirk");
-                                    std::unique_lock lock(m_focusFovMutex);
-
-                                    m_focusFovForDisplayTime.insert_or_assign(
-                                        viewLocateInfo->displayTime,
-                                        std::make_pair(views[xr::QuadView::FocusLeft].fov,
-                                                       views[xr::QuadView::FocusRight].fov));
-                                    TraceLoggingWriteStop(local, "xrLocateViews_StoreFovForQuirk");
-                                }
+                            }
+                        } else {
+                            result = OpenXrApi::xrLocateViews(
+                                session, &chainViewLocateInfo, viewState, 0, viewCountOutput, nullptr);
+                            if (XR_SUCCEEDED(result)) {
+                                *viewCountOutput = xr::QuadView::Count;
                             }
                         }
                     } else {
-                        result = OpenXrApi::xrLocateViews(
-                            session, &chainViewLocateInfo, viewState, 0, viewCountOutput, nullptr);
-                        if (XR_SUCCEEDED(result)) {
-                            *viewCountOutput = xr::QuadView::Count;
-                        }
+                        result = XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED;
                     }
                 } else {
-                    result = XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED;
+                    if (!m_useQuadViews) {
+                        result = OpenXrApi::xrLocateViews(
+                            session, viewLocateInfo, viewState, viewCapacityInput, viewCountOutput, views);
+                    } else {
+                        result = XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED;
+                    }
                 }
             } else {
-                if (!m_useQuadViews) {
-                    result = OpenXrApi::xrLocateViews(
-                        session, viewLocateInfo, viewState, viewCapacityInput, viewCountOutput, views);
-                } else {
-                    result = XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED;
-                }
+                result = OpenXrApi::xrLocateViews(
+                    session, viewLocateInfo, viewState, viewCapacityInput, viewCountOutput, views);
             }
 
             if (XR_SUCCEEDED(result)) {
@@ -985,10 +1016,12 @@ namespace openxr_api_layer {
             if (XR_SUCCEEDED(result)) {
                 TraceLoggingWrite(g_traceProvider, "xrCreateSwapchain", TLXArg(*swapchain, "Swapchain"));
 
-                std::unique_lock lock(m_swapchainsMutex);
-                Swapchain newEntry{};
-                newEntry.createInfo = *createInfo;
-                m_swapchains.insert_or_assign(*swapchain, std::move(newEntry));
+                if (isSessionHandled(session)) {
+                    std::unique_lock lock(m_swapchainsMutex);
+                    Swapchain newEntry{};
+                    newEntry.createInfo = *createInfo;
+                    m_swapchains.insert_or_assign(*swapchain, std::move(newEntry));
+                }
             }
 
             return result;
@@ -1017,13 +1050,15 @@ namespace openxr_api_layer {
                 std::unique_lock lock(m_swapchainsMutex);
 
                 auto it = m_swapchains.find(swapchain);
-                Swapchain& entry = it->second;
-                for (uint32_t i = 0; i < xr::StereoView::Count; i++) {
-                    if (entry.fullFovSwapchain[i] != XR_NULL_HANDLE) {
-                        OpenXrApi::xrDestroySwapchain(entry.fullFovSwapchain[i]);
+                if (it != m_swapchains.end()) {
+                    Swapchain& entry = it->second;
+                    for (uint32_t i = 0; i < xr::StereoView::Count; i++) {
+                        if (entry.fullFovSwapchain[i] != XR_NULL_HANDLE) {
+                            OpenXrApi::xrDestroySwapchain(entry.fullFovSwapchain[i]);
+                        }
                     }
+                    m_swapchains.erase(it);
                 }
-                m_swapchains.erase(it);
             }
 
             return result;
@@ -1057,8 +1092,12 @@ namespace openxr_api_layer {
                 TraceLoggingWrite(g_traceProvider, "xrAcquireSwapchainImage", TLArg(*index, "Index"));
 
                 std::unique_lock lock(m_swapchainsMutex);
-                Swapchain& entry = m_swapchains[swapchain];
-                entry.acquiredIndex.push_back(*index);
+
+                auto it = m_swapchains.find(swapchain);
+                if (it != m_swapchains.end()) {
+                    Swapchain& entry = it->second;
+                    entry.acquiredIndex.push_back(*index);
+                }
             }
 
             return result;
@@ -1091,9 +1130,12 @@ namespace openxr_api_layer {
             if (XR_SUCCEEDED(result)) {
                 std::unique_lock lock(m_swapchainsMutex);
 
-                Swapchain& entry = m_swapchains[swapchain];
-                entry.lastReleasedIndex = entry.acquiredIndex.front();
-                entry.acquiredIndex.pop_front();
+                auto it = m_swapchains.find(swapchain);
+                if (it != m_swapchains.end()) {
+                    Swapchain& entry = it->second;
+                    entry.lastReleasedIndex = entry.acquiredIndex.front();
+                    entry.acquiredIndex.pop_front();
+                }
             }
 
             return result;
@@ -1105,77 +1147,79 @@ namespace openxr_api_layer {
                              XrFrameState* frameState) override {
             TraceLoggingWrite(g_traceProvider, "xrWaitFrame", TLXArg(session, "Session"));
 
-            const auto lastFrameWaitTimestamp = m_lastFrameWaitTimestamp;
-            m_lastFrameWaitTimestamp = std::chrono::steady_clock::now();
-
             XrResult result = XR_ERROR_RUNTIME_FAILURE;
-            {
-                std::unique_lock lock(m_frameMutex);
 
-                // Roundup frame statistics.
-                if (IsTraceEnabled() && m_appFrameCpuTimer) {
-                    m_appFrameCpuTimer->stop();
+            if (isSessionHandled(session)) {
+                const auto lastFrameWaitTimestamp = m_lastFrameWaitTimestamp;
+                m_lastFrameWaitTimestamp = std::chrono::steady_clock::now();
 
-                    TraceLoggingWrite(g_traceProvider,
-                                      "AppStatistics",
-                                      TLArg(m_frameTimes.size(), "Fps"),
-                                      TLArg(m_appFrameCpuTimer->query(), "AppCpuTime"),
-                                      TLArg(m_lastAppRenderCpuTime, "RenderCpuTime"),
-                                      TLArg(m_lastAppFrameGpuTime, "AppGpuTime"));
+                {
+                    std::unique_lock lock(m_frameMutex);
+
+                    // Roundup frame statistics.
+                    if (IsTraceEnabled() && m_appFrameCpuTimer) {
+                        m_appFrameCpuTimer->stop();
+
+                        TraceLoggingWrite(g_traceProvider,
+                                          "AppStatistics",
+                                          TLArg(m_frameTimes.size(), "Fps"),
+                                          TLArg(m_appFrameCpuTimer->query(), "AppCpuTime"),
+                                          TLArg(m_lastAppRenderCpuTime, "RenderCpuTime"),
+                                          TLArg(m_lastAppFrameGpuTime, "AppGpuTime"));
+                    }
+
+                    if (m_asyncWaitPromise.valid()) {
+                        TraceLoggingWrite(g_traceProvider, "xrWaitFrame_AsyncWaitMode");
+
+                        // In Turbo mode, we accept pipelining of exactly one frame.
+                        if (m_asyncWaitPolled) {
+                            TraceLocalActivity(local);
+
+                            // On second frame poll, we must wait.
+                            TraceLoggingWriteStart(local, "xrWaitFrame_AsyncWaitNow");
+                            m_asyncWaitPromise.wait();
+                            TraceLoggingWriteStop(local, "xrWaitFrame_AsyncWaitNow");
+                        }
+                        m_asyncWaitPolled = true;
+
+                        // In Turbo mode, we don't actually wait, we make up a predicted time.
+                        {
+                            std::unique_lock lock(m_asyncWaitMutex);
+
+                            frameState->predictedDisplayTime =
+                                m_asyncWaitCompleted ? m_lastPredictedDisplayTime
+                                                     : (m_lastPredictedDisplayTime +
+                                                        (m_lastFrameWaitTimestamp - lastFrameWaitTimestamp).count());
+                            frameState->predictedDisplayPeriod = m_lastPredictedDisplayPeriod;
+                        }
+                        frameState->shouldRender = XR_TRUE;
+
+                        result = XR_SUCCESS;
+
+                    } else {
+                        lock.unlock();
+                        {
+                            TraceLocalActivity(local);
+                            TraceLoggingWriteStart(local, "xrWaitFrame_WaitFrame");
+                            result = OpenXrApi::xrWaitFrame(session, frameWaitInfo, frameState);
+                            TraceLoggingWriteStop(local, "xrWaitFrame_WaitFrame");
+                        }
+                        lock.lock();
+
+                        if (XR_SUCCEEDED(result)) {
+                            // We must always store those values to properly handle transitions into Turbo Mode.
+                            m_lastPredictedDisplayTime = frameState->predictedDisplayTime;
+                            m_lastPredictedDisplayPeriod = frameState->predictedDisplayPeriod;
+                        }
+                    }
                 }
-
-                if (m_asyncWaitPromise.valid()) {
-                    TraceLoggingWrite(g_traceProvider, "xrWaitFrame_AsyncWaitMode");
-
-                    // In Turbo mode, we accept pipelining of exactly one frame.
-                    if (m_asyncWaitPolled) {
-                        TraceLocalActivity(local);
-
-                        // On second frame poll, we must wait.
-                        TraceLoggingWriteStart(local, "xrWaitFrame_AsyncWaitNow");
-                        m_asyncWaitPromise.wait();
-                        TraceLoggingWriteStop(local, "xrWaitFrame_AsyncWaitNow");
-                    }
-                    m_asyncWaitPolled = true;
-
-                    // In Turbo mode, we don't actually wait, we make up a predicted time.
-                    {
-                        std::unique_lock lock(m_asyncWaitMutex);
-
-                        frameState->predictedDisplayTime =
-                            m_asyncWaitCompleted ? m_lastPredictedDisplayTime
-                                                 : (m_lastPredictedDisplayTime +
-                                                    (m_lastFrameWaitTimestamp - lastFrameWaitTimestamp).count());
-                        frameState->predictedDisplayPeriod = m_lastPredictedDisplayPeriod;
-                    }
-                    frameState->shouldRender = XR_TRUE;
-
-                    result = XR_SUCCESS;
-
-                } else {
-                    lock.unlock();
-                    {
-                        TraceLocalActivity(local);
-                        TraceLoggingWriteStart(local, "xrWaitFrame_WaitFrame");
-                        result = OpenXrApi::xrWaitFrame(session, frameWaitInfo, frameState);
-                        TraceLoggingWriteStop(local, "xrWaitFrame_WaitFrame");
-                    }
-                    lock.lock();
-
-                    if (XR_SUCCEEDED(result)) {
-                        // We must always store those values to properly handle transitions into Turbo Mode.
-                        m_lastPredictedDisplayTime = frameState->predictedDisplayTime;
-                        m_lastPredictedDisplayPeriod = frameState->predictedDisplayPeriod;
-                    }
-                }
+            } else {
+                result = OpenXrApi::xrWaitFrame(session, frameWaitInfo, frameState);
             }
 
             if (XR_SUCCEEDED(result)) {
                 // Per OpenXR spec, the predicted display must increase monotonically.
                 frameState->predictedDisplayTime = std::max(frameState->predictedDisplayTime, m_waitedFrameTime + 1);
-
-                // Record the predicted display time.
-                m_waitedFrameTime = frameState->predictedDisplayTime;
 
                 TraceLoggingWrite(g_traceProvider,
                                   "xrWaitFrame",
@@ -1183,12 +1227,17 @@ namespace openxr_api_layer {
                                   TLArg(frameState->predictedDisplayTime, "PredictedDisplayTime"),
                                   TLArg(frameState->predictedDisplayPeriod, "PredictedDisplayPeriod"));
 
-                // Start app timers.
-                {
-                    std::unique_lock lock(m_frameMutex);
+                if (isSessionHandled(session)) {
+                    // Record the predicted display time.
+                    m_waitedFrameTime = frameState->predictedDisplayTime;
 
-                    if (IsTraceEnabled() && m_appFrameCpuTimer) {
-                        m_appFrameCpuTimer->start();
+                    // Start app timers.
+                    {
+                        std::unique_lock lock(m_frameMutex);
+
+                        if (IsTraceEnabled() && m_appFrameCpuTimer) {
+                            m_appFrameCpuTimer->start();
+                        }
                     }
                 }
             }
@@ -1201,7 +1250,7 @@ namespace openxr_api_layer {
             TraceLoggingWrite(g_traceProvider, "xrBeginFrame", TLXArg(session, "Session"));
 
             XrResult result = XR_ERROR_RUNTIME_FAILURE;
-            {
+            if (isSessionHandled(session)) {
                 std::unique_lock lock(m_frameMutex);
 
                 if (m_asyncWaitPromise.valid()) {
@@ -1214,32 +1263,36 @@ namespace openxr_api_layer {
                     result = OpenXrApi::xrBeginFrame(session, frameBeginInfo);
                     TraceLoggingWriteStop(local, "xrBeginFrame_BeginFrame");
                 }
+            } else {
+                result = OpenXrApi::xrBeginFrame(session, frameBeginInfo);
             }
 
             if (XR_SUCCEEDED(result)) {
-                if (m_useQuadViews && m_trackerType == Tracker::EyeGazeInteraction) {
-                    // TODO: Some applications may not advance the instance event state machine (via xrPollEvent()),
-                    // which causes actions to always return an inactive state. Force xrPollEvent() here if needed.
-                    XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
-                    XrActiveActionSet actionSet{};
-                    actionSet.actionSet = m_eyeTrackerActionSet;
-                    syncInfo.activeActionSets = &actionSet;
-                    syncInfo.countActiveActionSets = 1;
-                    {
-                        TraceLocalActivity(local);
-                        TraceLoggingWriteStart(local, "xrBeginFrame_SyncActions");
-                        CHECK_XRCMD(xrSyncActions(session, &syncInfo));
-                        TraceLoggingWriteStop(local, "xrBeginFrame_SyncActions");
+                if (isSessionHandled(session)) {
+                    if (m_useQuadViews && m_trackerType == Tracker::EyeGazeInteraction) {
+                        // TODO: Some applications may not advance the instance event state machine (via xrPollEvent()),
+                        // which causes actions to always return an inactive state. Force xrPollEvent() here if needed.
+                        XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
+                        XrActiveActionSet actionSet{};
+                        actionSet.actionSet = m_eyeTrackerActionSet;
+                        syncInfo.activeActionSets = &actionSet;
+                        syncInfo.countActiveActionSets = 1;
+                        {
+                            TraceLocalActivity(local);
+                            TraceLoggingWriteStart(local, "xrBeginFrame_SyncActions");
+                            CHECK_XRCMD(xrSyncActions(session, &syncInfo));
+                            TraceLoggingWriteStop(local, "xrBeginFrame_SyncActions");
+                        }
                     }
-                }
 
-                // Start app timers.
-                {
-                    std::unique_lock lock(m_frameMutex);
+                    // Start app timers.
+                    {
+                        std::unique_lock lock(m_frameMutex);
 
-                    if (IsTraceEnabled() && m_appFrameCpuTimer) {
-                        m_appRenderCpuTimer->start();
-                        m_appFrameGpuTimer[m_appFrameGpuTimerIndex]->start();
+                        if (IsTraceEnabled() && m_appFrameCpuTimer) {
+                            m_appRenderCpuTimer->start();
+                            m_appFrameGpuTimer[m_appFrameGpuTimerIndex]->start();
+                        }
                     }
                 }
             }
@@ -1259,7 +1312,7 @@ namespace openxr_api_layer {
                               TLArg(frameEndInfo->displayTime, "DisplayTime"),
                               TLArg(xr::ToCString(frameEndInfo->environmentBlendMode), "EnvironmentBlendMode"));
 
-            {
+            if (isSessionHandled(session)) {
                 std::unique_lock lock(m_frameMutex);
 
                 // Stop app timers.
@@ -1278,9 +1331,9 @@ namespace openxr_api_layer {
                 while ((now - m_frameTimes.front()).count() >= 1'000'000'000) {
                     m_frameTimes.pop_front();
                 }
-            }
 
-            handleDebugKeys();
+                handleDebugKeys();
+            }
 
             // We will allocate structures to pass to the real xrEndFrame().
             std::vector<XrCompositionLayerProjection> projectionAllocator;
@@ -1293,292 +1346,299 @@ namespace openxr_api_layer {
 
             XrFrameEndInfo chainFrameEndInfo = *frameEndInfo;
 
-            if (m_useQuadViews) {
-                // Save the application context state.
-                ComPtr<ID3DDeviceContextState> applicationContextState;
-                {
-                    TraceLocalActivity(local);
-                    TraceLoggingWriteStart(local, "xrEndFrame_SwapDeviceContextState");
-                    m_renderContext->SwapDeviceContextState(m_layerContextState.Get(),
-                                                            applicationContextState.ReleaseAndGetAddressOf());
-                    m_renderContext->ClearState();
-                    TraceLoggingWriteStop(local, "xrEndFrame_SwapDeviceContextState");
-                }
-
-                // Restore the application context state upon leaving this scope.
-                auto scopeGuard = MakeScopeGuard([&] {
-                    TraceLocalActivity(local);
-                    TraceLoggingWriteStart(local, "xrEndFrame_SwapDeviceContextState");
-                    m_renderContext->SwapDeviceContextState(applicationContextState.Get(), nullptr);
-                    TraceLoggingWriteStop(local, "xrEndFrame_SwapDeviceContextState");
-                });
-
-                std::set<XrSwapchain> swapchainsToRelease;
-
-                for (uint32_t i = 0; i < frameEndInfo->layerCount; i++) {
-                    if (!frameEndInfo->layers[i]) {
-                        return XR_ERROR_LAYER_INVALID;
+            XrResult result = XR_ERROR_RUNTIME_FAILURE;
+            if (isSessionHandled(session)) {
+                if (m_useQuadViews) {
+                    // Save the application context state.
+                    ComPtr<ID3DDeviceContextState> applicationContextState;
+                    {
+                        TraceLocalActivity(local);
+                        TraceLoggingWriteStart(local, "xrEndFrame_SwapDeviceContextState");
+                        m_renderContext->SwapDeviceContextState(m_layerContextState.Get(),
+                                                                applicationContextState.ReleaseAndGetAddressOf());
+                        m_renderContext->ClearState();
+                        TraceLoggingWriteStop(local, "xrEndFrame_SwapDeviceContextState");
                     }
 
-                    if (frameEndInfo->layers[i]->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION) {
-                        const XrCompositionLayerProjection* proj =
-                            reinterpret_cast<const XrCompositionLayerProjection*>(frameEndInfo->layers[i]);
+                    // Restore the application context state upon leaving this scope.
+                    auto scopeGuard = MakeScopeGuard([&] {
+                        TraceLocalActivity(local);
+                        TraceLoggingWriteStart(local, "xrEndFrame_SwapDeviceContextState");
+                        m_renderContext->SwapDeviceContextState(applicationContextState.Get(), nullptr);
+                        TraceLoggingWriteStop(local, "xrEndFrame_SwapDeviceContextState");
+                    });
 
-                        TraceLoggingWrite(g_traceProvider,
-                                          "xrEndFrame_Layer",
-                                          TLArg(xr::ToCString(proj->type), "Type"),
-                                          TLArg(proj->layerFlags, "Flags"),
-                                          TLXArg(proj->space, "Space"));
+                    std::set<XrSwapchain> swapchainsToRelease;
 
-                        if (proj->viewCount != xr::QuadView::Count) {
-                            return XR_ERROR_VALIDATION_FAILURE;
+                    for (uint32_t i = 0; i < frameEndInfo->layerCount; i++) {
+                        if (!frameEndInfo->layers[i]) {
+                            return XR_ERROR_LAYER_INVALID;
                         }
 
-                        projectionViewAllocator.push_back(
-                            {proj->views[xr::StereoView::Left], proj->views[xr::StereoView::Right]});
+                        if (frameEndInfo->layers[i]->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION) {
+                            const XrCompositionLayerProjection* proj =
+                                reinterpret_cast<const XrCompositionLayerProjection*>(frameEndInfo->layers[i]);
 
-                        for (uint32_t viewIndex = 0; viewIndex < xr::StereoView::Count; viewIndex++) {
-                            for (uint32_t i = viewIndex; i < xr::QuadView::Count; i += xr::StereoView::Count) {
-                                TraceLoggingWrite(
-                                    g_traceProvider,
-                                    "xrEndFrame_View",
-                                    TLArg("Color", "Type"),
-                                    TLArg(i, "ViewIndex"),
-                                    TLXArg(proj->views[i].subImage.swapchain, "Swapchain"),
-                                    TLArg(proj->views[i].subImage.imageArrayIndex, "ImageArrayIndex"),
-                                    TLArg(xr::ToString(proj->views[i].subImage.imageRect).c_str(), "ImageRect"),
-                                    TLArg(xr::ToString(proj->views[i].pose).c_str(), "Pose"),
-                                    TLArg(xr::ToString(proj->views[i].fov).c_str(), "Fov"));
+                            TraceLoggingWrite(g_traceProvider,
+                                              "xrEndFrame_Layer",
+                                              TLArg(xr::ToCString(proj->type), "Type"),
+                                              TLArg(proj->layerFlags, "Flags"),
+                                              TLXArg(proj->space, "Space"));
+
+                            if (proj->viewCount != xr::QuadView::Count) {
+                                return XR_ERROR_VALIDATION_FAILURE;
                             }
 
-                            const uint32_t focusViewIndex = viewIndex + xr::StereoView::Count;
+                            projectionViewAllocator.push_back(
+                                {proj->views[xr::StereoView::Left], proj->views[xr::StereoView::Right]});
 
-                            std::unique_lock lock(m_swapchainsMutex);
-
-                            const auto it = m_swapchains.find(proj->views[viewIndex].subImage.swapchain);
-                            const auto it2 = m_swapchains.find(proj->views[focusViewIndex].subImage.swapchain);
-                            if (it == m_swapchains.end() || it2 == m_swapchains.end()) {
-                                return XR_ERROR_HANDLE_INVALID;
-                            }
-
-                            Swapchain& swapchainForStereoView = it->second;
-                            Swapchain& swapchainForFocusView = it2->second;
-
-                            if (swapchainForStereoView.deferredRelease) {
-                                swapchainsToRelease.insert(proj->views[viewIndex].subImage.swapchain);
-                                swapchainForStereoView.deferredRelease = false;
-                            }
-                            if (swapchainForFocusView.deferredRelease) {
-                                swapchainsToRelease.insert(proj->views[focusViewIndex].subImage.swapchain);
-                                swapchainForFocusView.deferredRelease = false;
-                            }
-
-                            // Allocate a destination swapchain.
-                            if (swapchainForStereoView.fullFovSwapchain[viewIndex] == XR_NULL_HANDLE) {
-                                XrSwapchainCreateInfo createInfo = swapchainForStereoView.createInfo;
-                                createInfo.arraySize = 1;
-                                createInfo.width = m_fullFovResolution.width;
-                                createInfo.height = m_fullFovResolution.height;
-                                TraceLoggingWrite(g_traceProvider,
-                                                  "xrEndFrame_CreateSwapchain",
-                                                  TLArg(m_fullFovResolution.width, "Width"),
-                                                  TLArg(m_fullFovResolution.height, "Height"));
-                                CHECK_XRCMD(OpenXrApi::xrCreateSwapchain(
-                                    session, &createInfo, &swapchainForStereoView.fullFovSwapchain[viewIndex]));
-                            }
-
-                            XrCompositionLayerProjectionView focusView = proj->views[focusViewIndex];
-                            if (m_needFocusFovCorrectionQuirk) {
-                                // Quirk for DCS World: the application does not pass the correct FOV for the
-                                // focus views in xrEndFrame(). We must keep track of the correct values for
-                                // each frame.
-                                TraceLocalActivity(local);
-                                TraceLoggingWriteStart(local, "xrEndFrame_LookupFovForQuirk");
-                                std::unique_lock lock(m_focusFovMutex);
-
-                                bool found = false;
-                                const auto& cit = m_focusFovForDisplayTime.find(frameEndInfo->displayTime);
-                                if (cit != m_focusFovForDisplayTime.cend()) {
-                                    focusView.fov = focusViewIndex == xr::QuadView::FocusLeft ? cit->second.first
-                                                                                              : cit->second.second;
-                                    found = true;
+                            for (uint32_t viewIndex = 0; viewIndex < xr::StereoView::Count; viewIndex++) {
+                                for (uint32_t i = viewIndex; i < xr::QuadView::Count; i += xr::StereoView::Count) {
+                                    TraceLoggingWrite(
+                                        g_traceProvider,
+                                        "xrEndFrame_View",
+                                        TLArg("Color", "Type"),
+                                        TLArg(i, "ViewIndex"),
+                                        TLXArg(proj->views[i].subImage.swapchain, "Swapchain"),
+                                        TLArg(proj->views[i].subImage.imageArrayIndex, "ImageArrayIndex"),
+                                        TLArg(xr::ToString(proj->views[i].subImage.imageRect).c_str(), "ImageRect"),
+                                        TLArg(xr::ToString(proj->views[i].pose).c_str(), "Pose"),
+                                        TLArg(xr::ToString(proj->views[i].fov).c_str(), "Fov"));
                                 }
-                                TraceLoggingWriteStop(local, "xrEndFrame_LookupFovForQuirk", TLArg(found, "Found"));
-                            }
 
-                            // Composite the focus view and the stereo view together into a single stereo view.
-                            compositeViewContent(viewIndex,
-                                                 proj->views[viewIndex],
-                                                 swapchainForStereoView,
-                                                 focusView,
-                                                 swapchainForFocusView,
-                                                 proj->layerFlags);
-
-                            // Patch the view to reference the new swapchain at full FOV.
-                            XrCompositionLayerProjectionView& patchedView = projectionViewAllocator.back()[viewIndex];
-                            patchedView.fov = m_cachedEyeFov[viewIndex];
-                            patchedView.subImage.swapchain = swapchainForStereoView.fullFovSwapchain[viewIndex];
-                            patchedView.subImage.imageArrayIndex = 0;
-                            patchedView.subImage.imageRect.offset = {0, 0};
-                            patchedView.subImage.imageRect.extent = m_fullFovResolution;
-
-                            if (m_requestedDepthSubmission && m_needDeferredSwapchainReleaseQuirk) {
-                                const XrBaseInStructure* entry =
-                                    reinterpret_cast<const XrBaseInStructure*>(proj->views[viewIndex].next);
-                                while (entry) {
-                                    if (entry->type == XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR) {
-                                        const XrCompositionLayerDepthInfoKHR* depth =
-                                            reinterpret_cast<const XrCompositionLayerDepthInfoKHR*>(entry);
-
-                                        TraceLoggingWrite(
-                                            g_traceProvider,
-                                            "xrEndFrame_View",
-                                            TLArg("Depth", "Type"),
-                                            TLArg(viewIndex, "ViewIndex"),
-                                            TLXArg(depth->subImage.swapchain, "Swapchain"),
-                                            TLArg(depth->subImage.imageArrayIndex, "ImageArrayIndex"),
-                                            TLArg(xr::ToString(depth->subImage.imageRect).c_str(), "ImageRect"),
-                                            TLArg(depth->nearZ, "Near"),
-                                            TLArg(depth->farZ, "Far"),
-                                            TLArg(depth->minDepth, "MinDepth"),
-                                            TLArg(depth->maxDepth, "MaxDepth"));
-
-                                        const auto it = m_swapchains.find(depth->subImage.swapchain);
-                                        if (it == m_swapchains.end()) {
-                                            return XR_ERROR_HANDLE_INVALID;
-                                        }
-
-                                        Swapchain& swapchainForDepthInfo = it->second;
-
-                                        if (swapchainForDepthInfo.deferredRelease) {
-                                            swapchainsToRelease.insert(depth->subImage.swapchain);
-                                            swapchainForDepthInfo.deferredRelease = false;
-                                        }
-                                    }
-                                    entry = entry->next;
-                                }
-                            }
-                        }
-
-                        // Note: if a depth buffer was attached, we will use it as-is (per copy of the proj struct
-                        // below, and therefore its entire chain of next structs). This is good: we will submit a depth
-                        // that matches the composited view, but that is lower resolution.
-
-                        projectionAllocator.push_back(*proj);
-                        // Our shader always premultiplies the alpha channel.
-                        projectionAllocator.back().layerFlags &= ~XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
-                        projectionAllocator.back().views = projectionViewAllocator.back().data();
-                        projectionAllocator.back().viewCount = xr::StereoView::Count;
-                        layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&projectionAllocator.back()));
-
-                    } else {
-                        if (m_needDeferredSwapchainReleaseQuirk) {
-                            if (frameEndInfo->layers[i]->type == XR_TYPE_COMPOSITION_LAYER_QUAD) {
-                                const XrCompositionLayerQuad* quad =
-                                    reinterpret_cast<const XrCompositionLayerQuad*>(frameEndInfo->layers[i]);
+                                const uint32_t focusViewIndex = viewIndex + xr::StereoView::Count;
 
                                 std::unique_lock lock(m_swapchainsMutex);
 
-                                const auto it = m_swapchains.find(quad->subImage.swapchain);
-                                if (it != m_swapchains.end() && it->second.deferredRelease) {
-                                    swapchainsToRelease.insert(quad->subImage.swapchain);
-                                    it->second.deferredRelease = false;
+                                const auto it = m_swapchains.find(proj->views[viewIndex].subImage.swapchain);
+                                const auto it2 = m_swapchains.find(proj->views[focusViewIndex].subImage.swapchain);
+                                if (it == m_swapchains.end() || it2 == m_swapchains.end()) {
+                                    return XR_ERROR_HANDLE_INVALID;
+                                }
+
+                                Swapchain& swapchainForStereoView = it->second;
+                                Swapchain& swapchainForFocusView = it2->second;
+
+                                if (swapchainForStereoView.deferredRelease) {
+                                    swapchainsToRelease.insert(proj->views[viewIndex].subImage.swapchain);
+                                    swapchainForStereoView.deferredRelease = false;
+                                }
+                                if (swapchainForFocusView.deferredRelease) {
+                                    swapchainsToRelease.insert(proj->views[focusViewIndex].subImage.swapchain);
+                                    swapchainForFocusView.deferredRelease = false;
+                                }
+
+                                // Allocate a destination swapchain.
+                                if (swapchainForStereoView.fullFovSwapchain[viewIndex] == XR_NULL_HANDLE) {
+                                    XrSwapchainCreateInfo createInfo = swapchainForStereoView.createInfo;
+                                    createInfo.arraySize = 1;
+                                    createInfo.width = m_fullFovResolution.width;
+                                    createInfo.height = m_fullFovResolution.height;
+                                    TraceLoggingWrite(g_traceProvider,
+                                                      "xrEndFrame_CreateSwapchain",
+                                                      TLArg(m_fullFovResolution.width, "Width"),
+                                                      TLArg(m_fullFovResolution.height, "Height"));
+                                    CHECK_XRCMD(OpenXrApi::xrCreateSwapchain(
+                                        session, &createInfo, &swapchainForStereoView.fullFovSwapchain[viewIndex]));
+                                }
+
+                                XrCompositionLayerProjectionView focusView = proj->views[focusViewIndex];
+                                if (m_needFocusFovCorrectionQuirk) {
+                                    // Quirk for DCS World: the application does not pass the correct FOV for the
+                                    // focus views in xrEndFrame(). We must keep track of the correct values for
+                                    // each frame.
+                                    TraceLocalActivity(local);
+                                    TraceLoggingWriteStart(local, "xrEndFrame_LookupFovForQuirk");
+                                    std::unique_lock lock(m_focusFovMutex);
+
+                                    bool found = false;
+                                    const auto& cit = m_focusFovForDisplayTime.find(frameEndInfo->displayTime);
+                                    if (cit != m_focusFovForDisplayTime.cend()) {
+                                        focusView.fov = focusViewIndex == xr::QuadView::FocusLeft ? cit->second.first
+                                                                                                  : cit->second.second;
+                                        found = true;
+                                    }
+                                    TraceLoggingWriteStop(local, "xrEndFrame_LookupFovForQuirk", TLArg(found, "Found"));
+                                }
+
+                                // Composite the focus view and the stereo view together into a single stereo view.
+                                compositeViewContent(viewIndex,
+                                                     proj->views[viewIndex],
+                                                     swapchainForStereoView,
+                                                     focusView,
+                                                     swapchainForFocusView,
+                                                     proj->layerFlags);
+
+                                // Patch the view to reference the new swapchain at full FOV.
+                                XrCompositionLayerProjectionView& patchedView =
+                                    projectionViewAllocator.back()[viewIndex];
+                                patchedView.fov = m_cachedEyeFov[viewIndex];
+                                patchedView.subImage.swapchain = swapchainForStereoView.fullFovSwapchain[viewIndex];
+                                patchedView.subImage.imageArrayIndex = 0;
+                                patchedView.subImage.imageRect.offset = {0, 0};
+                                patchedView.subImage.imageRect.extent = m_fullFovResolution;
+
+                                if (m_requestedDepthSubmission && m_needDeferredSwapchainReleaseQuirk) {
+                                    const XrBaseInStructure* entry =
+                                        reinterpret_cast<const XrBaseInStructure*>(proj->views[viewIndex].next);
+                                    while (entry) {
+                                        if (entry->type == XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR) {
+                                            const XrCompositionLayerDepthInfoKHR* depth =
+                                                reinterpret_cast<const XrCompositionLayerDepthInfoKHR*>(entry);
+
+                                            TraceLoggingWrite(
+                                                g_traceProvider,
+                                                "xrEndFrame_View",
+                                                TLArg("Depth", "Type"),
+                                                TLArg(viewIndex, "ViewIndex"),
+                                                TLXArg(depth->subImage.swapchain, "Swapchain"),
+                                                TLArg(depth->subImage.imageArrayIndex, "ImageArrayIndex"),
+                                                TLArg(xr::ToString(depth->subImage.imageRect).c_str(), "ImageRect"),
+                                                TLArg(depth->nearZ, "Near"),
+                                                TLArg(depth->farZ, "Far"),
+                                                TLArg(depth->minDepth, "MinDepth"),
+                                                TLArg(depth->maxDepth, "MaxDepth"));
+
+                                            const auto it = m_swapchains.find(depth->subImage.swapchain);
+                                            if (it == m_swapchains.end()) {
+                                                return XR_ERROR_HANDLE_INVALID;
+                                            }
+
+                                            Swapchain& swapchainForDepthInfo = it->second;
+
+                                            if (swapchainForDepthInfo.deferredRelease) {
+                                                swapchainsToRelease.insert(depth->subImage.swapchain);
+                                                swapchainForDepthInfo.deferredRelease = false;
+                                            }
+                                        }
+                                        entry = entry->next;
+                                    }
                                 }
                             }
-                            // TODO: We need to handle all other types of composition layers in order to mark the
-                            // swapchains for deferred release. Luckily we only need this quirk on Varjo and the runtime
-                            // does not support any other type of composition layers.
+
+                            // Note: if a depth buffer was attached, we will use it as-is (per copy of the proj struct
+                            // below, and therefore its entire chain of next structs). This is good: we will submit a
+                            // depth that matches the composited view, but that is lower resolution.
+
+                            projectionAllocator.push_back(*proj);
+                            // Our shader always premultiplies the alpha channel.
+                            projectionAllocator.back().layerFlags &= ~XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+                            projectionAllocator.back().views = projectionViewAllocator.back().data();
+                            projectionAllocator.back().viewCount = xr::StereoView::Count;
+                            layers.push_back(
+                                reinterpret_cast<XrCompositionLayerBaseHeader*>(&projectionAllocator.back()));
+
+                        } else {
+                            if (m_needDeferredSwapchainReleaseQuirk) {
+                                if (frameEndInfo->layers[i]->type == XR_TYPE_COMPOSITION_LAYER_QUAD) {
+                                    const XrCompositionLayerQuad* quad =
+                                        reinterpret_cast<const XrCompositionLayerQuad*>(frameEndInfo->layers[i]);
+
+                                    std::unique_lock lock(m_swapchainsMutex);
+
+                                    const auto it = m_swapchains.find(quad->subImage.swapchain);
+                                    if (it != m_swapchains.end() && it->second.deferredRelease) {
+                                        swapchainsToRelease.insert(quad->subImage.swapchain);
+                                        it->second.deferredRelease = false;
+                                    }
+                                }
+                                // TODO: We need to handle all other types of composition layers in order to mark the
+                                // swapchains for deferred release. Luckily we only need this quirk on Varjo and the
+                                // runtime does not support any other type of composition layers.
+                            }
+
+                            TraceLoggingWrite(g_traceProvider,
+                                              "xrEndFrame_Layer",
+                                              TLArg(xr::ToCString(frameEndInfo->layers[i]->type), "Type"));
+                            layers.push_back(frameEndInfo->layers[i]);
                         }
-
-                        TraceLoggingWrite(g_traceProvider,
-                                          "xrEndFrame_Layer",
-                                          TLArg(xr::ToCString(frameEndInfo->layers[i]->type), "Type"));
-                        layers.push_back(frameEndInfo->layers[i]);
-                    }
-                }
-
-                chainFrameEndInfo.layers = layers.data();
-                chainFrameEndInfo.layerCount = (uint32_t)layers.size();
-
-                if (m_needFocusFovCorrectionQuirk) {
-                    TraceLocalActivity(local);
-                    TraceLoggingWriteStart(local, "xrEndFrame_AgeFovForQuirk");
-                    std::unique_lock lock(m_focusFovMutex);
-
-                    // Delete all entries older than 1s.
-                    while (!m_focusFovForDisplayTime.empty() &&
-                           m_focusFovForDisplayTime.cbegin()->first < frameEndInfo->displayTime - 1'000'000'000) {
-                        m_focusFovForDisplayTime.erase(m_focusFovForDisplayTime.begin());
-                    }
-                    TraceLoggingWriteStop(
-                        local, "xrEndFrame_AgeFovForQuirk", TLArg(m_focusFovForDisplayTime.size(), "DictionarySize"));
-                }
-
-                // Perform deferred swapchains release now.
-                for (auto swapchain : swapchainsToRelease) {
-                    TraceLoggingWrite(
-                        g_traceProvider, "xrEndFrame_DeferredSwapchainRelease", TLXArg(swapchain, "Swapchain"));
-
-                    CHECK_XRCMD(OpenXrApi::xrReleaseSwapchainImage(swapchain, nullptr));
-                }
-            }
-
-            XrResult result = XR_ERROR_RUNTIME_FAILURE;
-            {
-                std::unique_lock lock(m_frameMutex);
-
-                if (m_asyncWaitPromise.valid()) {
-                    TraceLocalActivity(local);
-
-                    // This is the latest point we must have fully waited a frame before proceeding.
-                    //
-                    // Note: we should not wait infinitely here, however certain patterns of engine calls may cause us
-                    // to attempt a "double xrWaitFrame" when turning on Turbo. Use a timeout to detect that, and
-                    // refrain from enqueing a second wait further down. This isn't a pretty solution, but it is simple
-                    // and it seems to work effectively (minus the 1s freeze observed in-game).
-                    TraceLoggingWriteStart(local, "xrEndFrame_AsyncWaitNow");
-                    const auto ready = m_asyncWaitPromise.wait_for(1s) == std::future_status::ready;
-                    TraceLoggingWriteStop(local, "xrEndFrame_AsyncWaitNow", TLArg(ready, "Ready"));
-                    if (ready) {
-                        m_asyncWaitPromise = {};
                     }
 
-                    CHECK_XRCMD(OpenXrApi::xrBeginFrame(session, nullptr));
+                    chainFrameEndInfo.layers = layers.data();
+                    chainFrameEndInfo.layerCount = (uint32_t)layers.size();
+
+                    if (m_needFocusFovCorrectionQuirk) {
+                        TraceLocalActivity(local);
+                        TraceLoggingWriteStart(local, "xrEndFrame_AgeFovForQuirk");
+                        std::unique_lock lock(m_focusFovMutex);
+
+                        // Delete all entries older than 1s.
+                        while (!m_focusFovForDisplayTime.empty() &&
+                               m_focusFovForDisplayTime.cbegin()->first < frameEndInfo->displayTime - 1'000'000'000) {
+                            m_focusFovForDisplayTime.erase(m_focusFovForDisplayTime.begin());
+                        }
+                        TraceLoggingWriteStop(local,
+                                              "xrEndFrame_AgeFovForQuirk",
+                                              TLArg(m_focusFovForDisplayTime.size(), "DictionarySize"));
+                    }
+
+                    // Perform deferred swapchains release now.
+                    for (auto swapchain : swapchainsToRelease) {
+                        TraceLoggingWrite(
+                            g_traceProvider, "xrEndFrame_DeferredSwapchainRelease", TLXArg(swapchain, "Swapchain"));
+
+                        CHECK_XRCMD(OpenXrApi::xrReleaseSwapchainImage(swapchain, nullptr));
+                    }
                 }
 
                 {
-                    TraceLocalActivity(local);
-                    TraceLoggingWriteStart(local, "xrEndFrame_EndFrame");
-                    result = OpenXrApi::xrEndFrame(session, &chainFrameEndInfo);
-                    TraceLoggingWriteStop(local, "xrEndFrame_EndFrame");
-                }
+                    std::unique_lock lock(m_frameMutex);
 
-                if (m_useTurboMode && !m_asyncWaitPromise.valid()) {
-                    m_asyncWaitPolled = false;
-                    m_asyncWaitCompleted = false;
-
-                    // In Turbo mode, we kick off a wait thread immediately.
-                    TraceLoggingWrite(g_traceProvider, "xrEndFrame_AsyncWaitStart");
-                    m_asyncWaitPromise = std::async(std::launch::async, [&, session] {
+                    if (m_asyncWaitPromise.valid()) {
                         TraceLocalActivity(local);
 
-                        XrFrameState frameState{XR_TYPE_FRAME_STATE};
-                        TraceLoggingWriteStart(local, "AsyncWaitFrame");
-                        CHECK_XRCMD(OpenXrApi::xrWaitFrame(session, nullptr, &frameState));
-                        TraceLoggingWriteStop(local,
-                                              "AsyncWaitFrame",
-                                              TLArg(frameState.predictedDisplayTime, "PredictedDisplayTime"),
-                                              TLArg(frameState.predictedDisplayPeriod, "PredictedDisplayPeriod"));
-                        {
-                            std::unique_lock lock(m_asyncWaitMutex);
-
-                            m_lastPredictedDisplayTime = frameState.predictedDisplayTime;
-                            m_lastPredictedDisplayPeriod = frameState.predictedDisplayPeriod;
-
-                            m_asyncWaitCompleted = true;
+                        // This is the latest point we must have fully waited a frame before proceeding.
+                        //
+                        // Note: we should not wait infinitely here, however certain patterns of engine calls may cause
+                        // us to attempt a "double xrWaitFrame" when turning on Turbo. Use a timeout to detect that, and
+                        // refrain from enqueing a second wait further down. This isn't a pretty solution, but it is
+                        // simple and it seems to work effectively (minus the 1s freeze observed in-game).
+                        TraceLoggingWriteStart(local, "xrEndFrame_AsyncWaitNow");
+                        const auto ready = m_asyncWaitPromise.wait_for(1s) == std::future_status::ready;
+                        TraceLoggingWriteStop(local, "xrEndFrame_AsyncWaitNow", TLArg(ready, "Ready"));
+                        if (ready) {
+                            m_asyncWaitPromise = {};
                         }
-                    });
+
+                        CHECK_XRCMD(OpenXrApi::xrBeginFrame(session, nullptr));
+                    }
+
+                    {
+                        TraceLocalActivity(local);
+                        TraceLoggingWriteStart(local, "xrEndFrame_EndFrame");
+                        result = OpenXrApi::xrEndFrame(session, &chainFrameEndInfo);
+                        TraceLoggingWriteStop(local, "xrEndFrame_EndFrame");
+                    }
+
+                    if (m_useTurboMode && !m_asyncWaitPromise.valid()) {
+                        m_asyncWaitPolled = false;
+                        m_asyncWaitCompleted = false;
+
+                        // In Turbo mode, we kick off a wait thread immediately.
+                        TraceLoggingWrite(g_traceProvider, "xrEndFrame_AsyncWaitStart");
+                        m_asyncWaitPromise = std::async(std::launch::async, [&, session] {
+                            TraceLocalActivity(local);
+
+                            XrFrameState frameState{XR_TYPE_FRAME_STATE};
+                            TraceLoggingWriteStart(local, "AsyncWaitFrame");
+                            CHECK_XRCMD(OpenXrApi::xrWaitFrame(session, nullptr, &frameState));
+                            TraceLoggingWriteStop(local,
+                                                  "AsyncWaitFrame",
+                                                  TLArg(frameState.predictedDisplayTime, "PredictedDisplayTime"),
+                                                  TLArg(frameState.predictedDisplayPeriod, "PredictedDisplayPeriod"));
+                            {
+                                std::unique_lock lock(m_asyncWaitMutex);
+
+                                m_lastPredictedDisplayTime = frameState.predictedDisplayTime;
+                                m_lastPredictedDisplayPeriod = frameState.predictedDisplayPeriod;
+
+                                m_asyncWaitCompleted = true;
+                            }
+                        });
+                    }
                 }
+            } else {
+                result = OpenXrApi::xrEndFrame(session, frameEndInfo);
             }
 
             return result;
@@ -1600,7 +1660,10 @@ namespace openxr_api_layer {
 
             XrReferenceSpaceCreateInfo chainCreateInfo = *createInfo;
 
-            if (createInfo->referenceSpaceType == XR_REFERENCE_SPACE_TYPE_COMBINED_EYE_VARJO) {
+            const bool isVarjoCombinedEyeSpace =
+                isSessionHandled(session) && m_requestedFoveatedRendering &&
+                createInfo->referenceSpaceType == XR_REFERENCE_SPACE_TYPE_COMBINED_EYE_VARJO;
+            if (isVarjoCombinedEyeSpace) {
                 // Create a dummy space, we will keep track of those handles below.
                 chainCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
             }
@@ -1610,7 +1673,7 @@ namespace openxr_api_layer {
             if (XR_SUCCEEDED(result)) {
                 TraceLoggingWrite(g_traceProvider, "xrCreateReferenceSpace", TLXArg(*space, "Space"));
 
-                if (createInfo->referenceSpaceType == XR_REFERENCE_SPACE_TYPE_COMBINED_EYE_VARJO) {
+                if (isVarjoCombinedEyeSpace) {
                     std::unique_lock lock(m_spacesMutex);
 
                     m_gazeSpaces.insert(*space);
@@ -1691,8 +1754,8 @@ namespace openxr_api_layer {
                 if (eventData->type == XR_TYPE_EVENT_DATA_VISIBILITY_MASK_CHANGED_KHR) {
                     XrEventDataVisibilityMaskChangedKHR* event =
                         reinterpret_cast<XrEventDataVisibilityMaskChangedKHR*>(eventData);
-                    // We will implement quad views on top of stereo. If the stereo mask changes, then it means the quad
-                    // views mask for the peripheral views changes.
+                    // We will implement quad views on top of stereo. If the stereo mask changes, then it means the
+                    // quad views mask for the peripheral views changes.
                     if (event->viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO) {
                         event->viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO;
                     }
@@ -1722,37 +1785,42 @@ namespace openxr_api_layer {
                               TLArg(visibilityMask->indexCapacityInput, "IndexCapacityInput"));
 
             XrResult result = XR_ERROR_RUNTIME_FAILURE;
-            if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO &&
-                viewIndex >= xr::StereoView::Count) {
-                if (m_useQuadViews) {
-                    // No mask on the focus view.
-                    if (viewIndex == xr::QuadView::FocusLeft || viewIndex == xr::QuadView::FocusRight) {
-                        visibilityMask->vertexCountOutput = 0;
-                        visibilityMask->indexCountOutput = 0;
-
-                        result = XR_SUCCESS;
-                    } else {
-                        result = XR_ERROR_VALIDATION_FAILURE;
-                    }
-                } else {
-                    result = XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED;
-                }
-            } else {
-                // We will implement quad views on top of stereo. Use the regular mask for the peripheral view.
-                if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+            if (isSessionHandled(session)) {
+                if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO &&
+                    viewIndex >= xr::StereoView::Count) {
                     if (m_useQuadViews) {
-                        result = OpenXrApi::xrGetVisibilityMaskKHR(session,
-                                                                   XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
-                                                                   viewIndex,
-                                                                   visibilityMaskType,
-                                                                   visibilityMask);
+                        // No mask on the focus view.
+                        if (viewIndex == xr::QuadView::FocusLeft || viewIndex == xr::QuadView::FocusRight) {
+                            visibilityMask->vertexCountOutput = 0;
+                            visibilityMask->indexCountOutput = 0;
+
+                            result = XR_SUCCESS;
+                        } else {
+                            result = XR_ERROR_VALIDATION_FAILURE;
+                        }
                     } else {
                         result = XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED;
                     }
                 } else {
-                    result = OpenXrApi::xrGetVisibilityMaskKHR(
-                        session, viewConfigurationType, viewIndex, visibilityMaskType, visibilityMask);
+                    // We will implement quad views on top of stereo. Use the regular mask for the peripheral view.
+                    if (viewConfigurationType == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_QUAD_VARJO) {
+                        if (m_useQuadViews) {
+                            result = OpenXrApi::xrGetVisibilityMaskKHR(session,
+                                                                       XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+                                                                       viewIndex,
+                                                                       visibilityMaskType,
+                                                                       visibilityMask);
+                        } else {
+                            result = XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED;
+                        }
+                    } else {
+                        result = OpenXrApi::xrGetVisibilityMaskKHR(
+                            session, viewConfigurationType, viewIndex, visibilityMaskType, visibilityMask);
+                    }
                 }
+            } else {
+                result = OpenXrApi::xrGetVisibilityMaskKHR(
+                    session, viewConfigurationType, viewIndex, visibilityMaskType, visibilityMask);
             }
 
             return result;
@@ -2588,7 +2656,8 @@ namespace openxr_api_layer {
                     if (line.substr(1, 4) == "app:") {
                         return GetApplicationName().find(line.substr(5, line.size() - 6)) != std::string::npos;
                     } else {
-                        return m_runtimeName.find(line.substr(1, line.size() - 2)) != std::string::npos;
+                        return m_runtimeName.find(line.substr(1, line.size() - 2)) != std::string::npos ||
+                               m_systemName.find(line.substr(1, line.size() - 2)) != std::string::npos;
                     }
                 }
 
@@ -2680,6 +2749,14 @@ namespace openxr_api_layer {
             return active;
         }
 
+        bool isSystemHandled(XrSystemId systemId) const {
+            return systemId == m_systemId;
+        }
+
+        bool isSessionHandled(XrSession session) const {
+            return session == m_session;
+        }
+
         enum Tracker {
             None = 0,
             SimulatedTracking,
@@ -2693,10 +2770,10 @@ namespace openxr_api_layer {
         bool m_requestedDepthSubmission{false};
         bool m_requestedD3D11{false};
         std::string m_runtimeName;
+        XrSystemId m_systemId{XR_NULL_SYSTEM_ID};
+        std::string m_systemName;
         bool m_loggedResolution{false};
         Tracker m_trackerType{Tracker::None};
-
-        XrSystemId m_systemId{XR_NULL_SYSTEM_ID};
 
         float m_peripheralPixelDensity{0.5f};
         float m_focusPixelDensity{1.f};
