@@ -81,6 +81,14 @@ namespace openxr_api_layer {
                 PFN_xrDestroyInstance xrDestroyInstance;
                 CHECK_XRCMD(apiLayerInfo->nextInfo->nextGetInstanceProcAddr(
                     dummyInstance, "xrDestroyInstance", reinterpret_cast<PFN_xrVoidFunction*>(&xrDestroyInstance)));
+                PFN_xrGetSystem xrGetSystem = nullptr;
+                CHECK_XRCMD(apiLayerInfo->nextInfo->nextGetInstanceProcAddr(
+                    dummyInstance, "xrGetSystem", reinterpret_cast<PFN_xrVoidFunction*>(&xrGetSystem)));
+                PFN_xrGetSystemProperties xrGetSystemProperties = nullptr;
+                CHECK_XRCMD(apiLayerInfo->nextInfo->nextGetInstanceProcAddr(
+                    dummyInstance,
+                    "xrGetSystemProperties",
+                    reinterpret_cast<PFN_xrVoidFunction*>(&xrGetSystemProperties)));
 
                 // Check the available extensions.
                 PFN_xrEnumerateInstanceExtensionProperties xrEnumerateInstanceExtensionProperties;
@@ -106,7 +114,24 @@ namespace openxr_api_layer {
                     }
                 }
 
-                CHECK_XRCMD(xrDestroyInstance(dummyInstance));
+                // Workaround: the Vive runtime does not seem to like our flow of destroying the instance
+                // mid-initialization. We skip destruction and we will just create a second instance.
+                if (xrGetSystem && xrGetSystemProperties) {
+                    XrSystemGetInfo getInfo{XR_TYPE_SYSTEM_GET_INFO};
+                    getInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+                    XrSystemId systemId;
+                    if (XR_SUCCEEDED(xrGetSystem(dummyInstance, &getInfo, &systemId))) {
+                        XrSystemProperties systemProperties{XR_TYPE_SYSTEM_PROPERTIES};
+                        CHECK_XRCMD(xrGetSystemProperties(dummyInstance, systemId, &systemProperties));
+                        if (std::string(systemProperties.systemName).find("Vive Reality system") != std::string::npos) {
+                            xrDestroyInstance = nullptr;
+                        }
+                    }
+                }
+
+                if (xrDestroyInstance) {
+                    xrDestroyInstance(dummyInstance);
+                }
             }
         }
 
