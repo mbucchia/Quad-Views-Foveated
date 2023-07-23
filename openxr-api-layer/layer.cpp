@@ -745,6 +745,9 @@ namespace openxr_api_layer {
                         }
                         Log(fmt::format("Turbo: {}\n", m_useTurboMode ? "Enabled" : "Disabled"));
                     }
+
+                    m_lastGoodEyeTrackingData = std::chrono::steady_clock::now();
+                    m_loggedEyeTrackingWarning = false;
                 }
             }
 
@@ -1285,6 +1288,13 @@ namespace openxr_api_layer {
                             CHECK_XRCMD(xrSyncActions(session, &syncInfo));
                             TraceLoggingWriteStop(local, "xrBeginFrame_SyncActions");
                         }
+                    }
+
+                    // Issue a warning if eye tracking was expected but does not seem functional.
+                    if (m_trackerType != Tracker::None && !m_loggedEyeTrackingWarning &&
+                        (std::chrono::steady_clock::now() - m_lastGoodEyeTrackingData).count() > 60'000'000'000) {
+                        Log("No data received from the eye tracker in 60 seconds! Image quality may be degraded.\n");
+                        m_loggedEyeTrackingWarning = true;
                     }
 
                     // Start app timers.
@@ -1987,6 +1997,11 @@ namespace openxr_api_layer {
                               "EyeGaze",
                               TLArg(result, "Valid"),
                               TLArg(xr::ToString(unitVector).c_str(), "GazeUnitVector"));
+
+            if (result) {
+                m_lastGoodEyeTrackingData = std::chrono::steady_clock::now();
+                m_loggedEyeTrackingWarning = false;
+            }
 
             return result;
         }
@@ -2854,6 +2869,10 @@ namespace openxr_api_layer {
         std::map<XrTime, std::pair<XrFovf, XrFovf>> m_focusFovForDisplayTime;
 
         bool m_isSupportedGraphicsApi{false};
+
+        // For logging useful warnings when eye tracking is not usable.
+        std::chrono::time_point<std::chrono::steady_clock> m_lastGoodEyeTrackingData{};
+        bool m_loggedEyeTrackingWarning{false};
 
         bool m_debugFocusView{false};
         bool m_debugEyeGaze{false};
