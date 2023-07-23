@@ -165,7 +165,8 @@ namespace openxr_api_layer
                     generated += f'''
 	XrResult XRAPI_CALL {cur_cmd.name}({parameters_list})
 	{{
-		TraceLoggingWrite(g_traceProvider, "{cur_cmd.name}");
+		TraceLocalActivity(local);
+		TraceLoggingWriteStart(local, "{cur_cmd.name}");
 
 		XrResult result;
 		try
@@ -174,12 +175,12 @@ namespace openxr_api_layer
 		}}
 		catch (std::exception& exc)
 		{{
-			TraceLoggingWrite(g_traceProvider, "{cur_cmd.name}_Error", TLArg(exc.what(), "Error"));
+			TraceLoggingWriteTagged(local, "{cur_cmd.name}_Error", TLArg(exc.what(), "Error"));
 			ErrorLog(fmt::format("{cur_cmd.name}: {{}}\\n", exc.what()));
 			result = XR_ERROR_RUNTIME_FAILURE;
 		}}
 
-		TraceLoggingWrite(g_traceProvider, "{cur_cmd.name}_Result", TLArg(xr::ToCString(result), "Result"));
+		TraceLoggingWriteStop(local, "{cur_cmd.name}", TLArg(xr::ToCString(result), "Result"));
 		if (XR_FAILED(result)) {{
 			ErrorLog(fmt::format("{cur_cmd.name} failed with {{}}\\n", xr::ToCString(result)));
 		}}
@@ -191,7 +192,8 @@ namespace openxr_api_layer
                     generated += f'''
 	void XRAPI_CALL {cur_cmd.name}({parameters_list})
 	{{
-		TraceLoggingWrite(g_traceProvider, "{cur_cmd.name}");
+		TraceLocalActivity(local);
+		TraceLoggingWriteStart(local, "{cur_cmd.name}");
 
 		try
 		{{
@@ -199,11 +201,11 @@ namespace openxr_api_layer
 		}}
 		catch (std::exception& exc)
 		{{
-			TraceLoggingWrite(g_traceProvider, "{cur_cmd.name}_Error", TLArg(exc.what(), "Error"));
+			TraceLoggingWriteTagged(local, "{cur_cmd.name}_Error", TLArg(exc.what(), "Error"));
 			ErrorLog(fmt::format("{cur_cmd.name}: {{}}\\n", exc.what()));
 		}}
 
-		TraceLoggingWrite(g_traceProvider, "{cur_cmd.name}_Complete");
+		TraceLoggingWriteStop(local, "{cur_cmd.name}"));
 	}}
 '''
                 
