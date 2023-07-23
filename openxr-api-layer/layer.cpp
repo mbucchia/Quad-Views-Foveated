@@ -211,8 +211,10 @@ namespace openxr_api_layer {
                                       TLArg(m_verticalFovSection[0], "FixedVerticalSection"),
                                       TLArg(m_horizontalFovSection[1], "FoveatedHorizontalSection"),
                                       TLArg(m_verticalFovSection[1], "FoveatedVerticalSection"),
-                                      TLArg(m_horizontalFocusOffset, "HorizontalFocusOffset"),
-                                      TLArg(m_verticalFocusOffset, "VerticalFocusOffset"),
+                                      TLArg(m_horizontalFixedOffset, "FixedHorizontalOffset"),
+                                      TLArg(m_verticalFixedOffset, "FixedVerticalOffset"),
+                                      TLArg(m_horizontalFocusOffset, "FoveatedHorizontalOffset"),
+                                      TLArg(m_verticalFocusOffset, "FoveatedVerticalOffset"),
                                       TLArg(m_horizontalFocusWideningMultiplier, "HorizontalFocusWideningMultiplier"),
                                       TLArg(m_verticalFocusWideningMultiplier, "VerticalFocusWideningMultiplier"),
                                       TLArg(m_focusWideningDeadzone, "FocusWideningDeadzone"),
@@ -2450,9 +2452,9 @@ namespace openxr_api_layer {
                 XrVector2f projectedGaze{};
                 ProjectPoint(view[eye], {0.f, 0.f, -1.f}, projectedGaze);
                 m_eyeGaze[eye] = m_centerOfFov[eye] = projectedGaze;
-                m_eyeGaze[eye] = m_eyeGaze[eye] + XrVector2f{eye == xr::StereoView::Left ? -m_horizontalFocusOffset
-                                                                                         : m_horizontalFocusOffset,
-                                                             m_verticalFocusOffset};
+                m_eyeGaze[eye] = m_eyeGaze[eye] + XrVector2f{eye == xr::StereoView::Left ? -m_horizontalFixedOffset
+                                                                                         : m_horizontalFixedOffset,
+                                                             m_verticalFixedOffset};
 
                 // Populate the FOV for the focus view (when no eye tracking is used).
                 const XrVector2f min{std::clamp(m_eyeGaze[eye].x - m_horizontalFovSection[0], -1.f, 1.f),
@@ -2690,6 +2692,12 @@ namespace openxr_api_layer {
                     } else if (name == "vertical_focus_section") {
                         m_verticalFovSection[1] = std::clamp(std::stof(value), 0.1f, 0.9f);
                         parsed = true;
+                    } else if (name == "horizontal_fixed_offset") {
+                        m_horizontalFixedOffset = std::clamp(std::stof(value), -0.5f, 0.5f);
+                        parsed = true;
+                    } else if (name == "vertical_fixed_offset") {
+                        m_verticalFixedOffset = std::clamp(std::stof(value), -0.5f, 0.5f);
+                        parsed = true;
                     } else if (name == "horizontal_focus_offset") {
                         m_horizontalFocusOffset = std::clamp(std::stof(value), -0.5f, 0.5f);
                         parsed = true;
@@ -2780,8 +2788,10 @@ namespace openxr_api_layer {
         // [0] = non-foveated, [1] = foveated
         float m_horizontalFovSection[2]{0.75f, 0.35f};
         float m_verticalFovSection[2]{0.7f, 0.35f};
-        float m_verticalFocusOffset{0.f};
         float m_horizontalFocusOffset{0.f};
+        float m_verticalFocusOffset{0.f};
+        float m_horizontalFixedOffset{0.f};
+        float m_verticalFixedOffset{0.f};
         float m_horizontalFocusWideningMultiplier{0.5f};
         float m_verticalFocusWideningMultiplier{0.2f};
         float m_focusWideningDeadzone{0.15f};
