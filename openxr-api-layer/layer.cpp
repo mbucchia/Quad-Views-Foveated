@@ -467,12 +467,25 @@ namespace openxr_api_layer {
                                             stereoPixelsCount,
                                             stereoResolution.width,
                                             stereoResolution.height));
-                            const uint32_t quadViewsPixelsCount =
+                            uint32_t quadViewsPixelsCount =
                                 xr::StereoView::Count * (views[xr::StereoView::Left].recommendedImageRectWidth *
                                                              views[xr::StereoView::Left].recommendedImageRectHeight +
                                                          views[xr::QuadView::FocusLeft].recommendedImageRectWidth *
                                                              views[xr::QuadView::FocusLeft].recommendedImageRectHeight);
                             Log(fmt::format("  Quad views pixel count is: {:L}\n", quadViewsPixelsCount));
+                            if (m_trackerType == Tracker::None && m_extendVisibilityMask) {
+                                const float horizontalObstructedSection =
+                                    m_horizontalFovSection[0] * (1 - 2 * m_smoothenFocusViewEdges);
+                                const float verticalObstructedSection =
+                                    m_verticalFovSection[0] * (1 - 2 * m_smoothenFocusViewEdges);
+                                const uint32_t additionalMaskPixelsCount =
+                                    xr::StereoView::Count * (views[xr::StereoView::Left].recommendedImageRectWidth *
+                                                             horizontalObstructedSection *
+                                                             views[xr::StereoView::Left].recommendedImageRectHeight *
+                                                             verticalObstructedSection);
+                                Log(fmt::format("  Masked pixel count is: {:L}\n", additionalMaskPixelsCount));
+                                quadViewsPixelsCount -= additionalMaskPixelsCount;
+                            }
                             Log(fmt::format("  Savings: -{:.1f}%%\n",
                                             100.f * (1.f - (float)quadViewsPixelsCount / stereoPixelsCount)));
 
@@ -1822,6 +1835,54 @@ namespace openxr_api_layer {
                                                                        viewIndex,
                                                                        visibilityMaskType,
                                                                        visibilityMask);
+
+                            // When doing fixed foveated rendering, use the visibility mask to avoid rendering the
+                            // pixels directly under the foveated region.
+                            if (m_trackerType == Tracker::None && m_extendVisibilityMask &&
+                                visibilityMaskType == XR_VISIBILITY_MASK_TYPE_HIDDEN_TRIANGLE_MESH_KHR) {
+                                uint32_t vertex = visibilityMask->vertexCountOutput;
+                                uint32_t index = visibilityMask->indexCountOutput;
+
+                                visibilityMask->vertexCountOutput += 4;
+                                visibilityMask->indexCountOutput += 6;
+
+                                if (visibilityMask->vertexCapacityInput && visibilityMask->indexCapacityInput) {
+                                    // Compute the region that is completely obstructed by the focus view.
+                                    const float horizontalObstructedSection =
+                                        m_horizontalFovSection[0] * (1 - 2 * m_smoothenFocusViewEdges);
+                                    const float verticalObstructedSection =
+                                        m_verticalFovSection[0] * (1 - 2 * m_smoothenFocusViewEdges);
+
+                                    const XrVector2f minNdc{
+                                        std::clamp(m_eyeGaze[viewIndex].x - horizontalObstructedSection, -1.f, 1.f),
+                                        std::clamp(m_eyeGaze[viewIndex].y - verticalObstructedSection, -1.f, 1.f)};
+                                    const XrVector2f maxNdc{
+                                        std::clamp(m_eyeGaze[viewIndex].x + horizontalObstructedSection, -1.f, 1.f),
+                                        std::clamp(m_eyeGaze[viewIndex].y + verticalObstructedSection, -1.f, 1.f)};
+
+                                    // Convert to 3D coordinates at Z=-1.
+                                    const DirectX::XMMATRIX inverseProjection = DirectX::XMMatrixInverse(
+                                        nullptr,
+                                        ComposeProjectionMatrix(m_cachedEyeFov[viewIndex], NearFar{0.1f, 20.f}));
+                                    auto min = DirectX::XMVector4Transform(
+                                        DirectX::XMVectorSet(minNdc.x, minNdc.y, 0, 1), inverseProjection);
+                                    auto max = DirectX::XMVector4Transform(
+                                        DirectX::XMVectorSet(maxNdc.x, maxNdc.y, 0, 1), inverseProjection);
+
+                                    // Add to the mesh.
+                                    visibilityMask->vertices[vertex + 0] = {max.m128_f32[0], max.m128_f32[1]};
+                                    visibilityMask->vertices[vertex + 1] = {min.m128_f32[0], max.m128_f32[1]};
+                                    visibilityMask->vertices[vertex + 2] = {min.m128_f32[0], min.m128_f32[1]};
+                                    visibilityMask->vertices[vertex + 3] = {max.m128_f32[0], min.m128_f32[1]};
+                                    visibilityMask->indices[index + 0] = index + 0;
+                                    visibilityMask->indices[index + 1] = index + 1;
+                                    visibilityMask->indices[index + 2] = index + 2;
+                                    visibilityMask->indices[index + 3] = index + 2;
+                                    visibilityMask->indices[index + 4] = index + 3;
+                                    visibilityMask->indices[index + 5] = index + 0;
+                                }
+                            }
+
                         } else {
                             result = XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED;
                         }
@@ -2740,6 +2801,9 @@ namespace openxr_api_layer {
                     } else if (name == "sharpen_focus_view") {
                         m_sharpenFocusView = std::clamp(std::stof(value), 0.f, 1.f);
                         parsed = true;
+                    } else if (name == "extend_visibility_mask") {
+                        m_extendVisibilityMask = std::stoi(value);
+                        parsed = true;
                     } else if (name == "turbo_mode") {
                         m_useTurboMode = std::stoi(value);
                         parsed = true;
@@ -2810,6 +2874,7 @@ namespace openxr_api_layer {
         float m_horizontalFocusWideningMultiplier{0.5f};
         float m_verticalFocusWideningMultiplier{0.2f};
         float m_focusWideningDeadzone{0.15f};
+        bool m_extendVisibilityMask{false};
         bool m_preferFoveatedRendering{true};
         bool m_forceNoEyeTracking{false};
         float m_smoothenFocusViewEdges{0.2f};
