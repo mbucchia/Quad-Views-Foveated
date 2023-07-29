@@ -35,7 +35,8 @@ namespace openxr_api_layer {
     XrResult XRAPI_CALL xrCreateApiLayerInstance(const XrInstanceCreateInfo* const instanceCreateInfo,
                                                  const struct XrApiLayerCreateInfo* const apiLayerInfo,
                                                  XrInstance* const instance) {
-        TraceLoggingWrite(g_traceProvider, "xrCreateApiLayerInstance");
+        TraceLocalActivity(local);
+        TraceLoggingWriteStart(local, "xrCreateApiLayerInstance");
 
         if (!apiLayerInfo || apiLayerInfo->structType != XR_LOADER_INTERFACE_STRUCT_API_LAYER_CREATE_INFO ||
             apiLayerInfo->structVersion != XR_API_LAYER_CREATE_INFO_STRUCT_VERSION ||
@@ -53,7 +54,7 @@ namespace openxr_api_layer {
         {
             auto info = apiLayerInfo->nextInfo;
             while (info) {
-                TraceLoggingWrite(g_traceProvider, "xrCreateApiLayerInstance", TLArg(info->layerName, "LayerName"));
+                TraceLoggingWriteTagged(local, "xrCreateApiLayerInstance", TLArg(info->layerName, "LayerName"));
                 Log(fmt::format("Using layer: {}\n", info->layerName));
                 info = info->next;
             }
@@ -140,7 +141,7 @@ namespace openxr_api_layer {
         std::vector<const char*> newEnabledExtensionNames;
         for (uint32_t i = 0; i < chainInstanceCreateInfo.enabledExtensionCount; i++) {
             const std::string_view ext(chainInstanceCreateInfo.enabledExtensionNames[i]);
-            TraceLoggingWrite(g_traceProvider, "xrCreateApiLayerInstance", TLArg(ext.data(), "ExtensionName"));
+            TraceLoggingWriteTagged(local, "xrCreateApiLayerInstance", TLArg(ext.data(), "ExtensionName"));
 
             if (std::find(blockedExtensions.cbegin(), blockedExtensions.cend(), ext) == blockedExtensions.cend()) {
                 Log(fmt::format("Requested extension: {}\n", ext));
@@ -171,7 +172,7 @@ namespace openxr_api_layer {
             try {
                 result = openxr_api_layer::GetInstance()->xrCreateInstance(instanceCreateInfo);
             } catch (std::exception& exc) {
-                TraceLoggingWrite(g_traceProvider, "xrCreateInstance_Error", TLArg(exc.what(), "Error"));
+                TraceLoggingWriteTagged(local, "xrCreateInstance_Error", TLArg(exc.what(), "Error"));
                 ErrorLog(fmt::format("xrCreateInstance: {}\n", exc.what()));
                 result = XR_ERROR_RUNTIME_FAILURE;
             }
@@ -186,7 +187,7 @@ namespace openxr_api_layer {
             }
         }
 
-        TraceLoggingWrite(g_traceProvider, "xrCreateApiLayerInstance_Result", TLArg(xr::ToCString(result), "Result"));
+        TraceLoggingWriteStop(local, "xrCreateApiLayerInstance", TLArg(xr::ToCString(result), "Result"));
         if (XR_FAILED(result)) {
             ErrorLog(fmt::format("xrCreateApiLayerInstance failed with {}\n", xr::ToCString(result)));
         }
@@ -196,18 +197,25 @@ namespace openxr_api_layer {
 
     // Forward the xrGetInstanceProcAddr() call to the dispatcher.
     XrResult XRAPI_CALL xrGetInstanceProcAddr(XrInstance instance, const char* name, PFN_xrVoidFunction* function) {
-        TraceLoggingWrite(g_traceProvider, "xrGetInstanceProcAddr");
+        TraceLocalActivity(local);
+        TraceLoggingWriteStart(local, "xrGetInstanceProcAddr");
 
         XrResult result;
         try {
-            result = openxr_api_layer::GetInstance()->xrGetInstanceProcAddr(instance, name, function);
+            if (std::string_view(name) != "xrEnumerateInstanceExtensionProperties") {
+                result = openxr_api_layer::GetInstance()->xrGetInstanceProcAddr(instance, name, function);
+            } else {
+                // We must always call our xrEnumerateInstanceExtensionProperties() override in order to be consistent
+                // with the list of extensions defined in our JSON.
+                result = openxr_api_layer::GetInstance()->xrGetInstanceProcAddrInternal(instance, name, function);
+            }
         } catch (std::exception& exc) {
-            TraceLoggingWrite(g_traceProvider, "xrGetInstanceProcAddr_Error", TLArg(exc.what(), "Error"));
+            TraceLoggingWriteTagged(local, "xrGetInstanceProcAddr_Error", TLArg(exc.what(), "Error"));
             ErrorLog(fmt::format("xrGetInstanceProcAddr: {}\n", exc.what()));
             result = XR_ERROR_RUNTIME_FAILURE;
         }
 
-        TraceLoggingWrite(g_traceProvider, "xrGetInstanceProcAddr_Result", TLArg(xr::ToCString(result), "Result"));
+        TraceLoggingWriteStop(local, "xrGetInstanceProcAddr", TLArg(xr::ToCString(result), "Result"));
 
         return result;
     }

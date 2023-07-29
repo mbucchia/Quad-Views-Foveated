@@ -39,6 +39,7 @@ namespace openxr_api_layer {
     // The path that is writable (eg: to store logs).
     extern std::filesystem::path localAppData;
 
+    extern const std::vector<std::pair<std::string, uint32_t>> advertisedExtensions;
     extern const std::vector<std::string> blockedExtensions;
     extern const std::vector<std::string> implicitExtensions;
 

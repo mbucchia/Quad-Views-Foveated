@@ -45,6 +45,10 @@ namespace openxr_api_layer {
     using namespace xr::math;
     using namespace openxr_api_layer::utils;
 
+    // Our API layer implement these extensions, and their specified version.
+    const std::vector<std::pair<std::string, uint32_t>> advertisedExtensions = {
+        {XR_VARJO_QUAD_VIEWS_EXTENSION_NAME, 1}, {XR_VARJO_FOVEATED_RENDERING_EXTENSION_NAME, 3}};
+
     // Initialize these vectors with arrays of extensions to block and implicitly request for the instance.
     const std::vector<std::string> blockedExtensions = {XR_VARJO_QUAD_VIEWS_EXTENSION_NAME,
                                                         XR_VARJO_FOVEATED_RENDERING_EXTENSION_NAME};
