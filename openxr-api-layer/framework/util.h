@@ -30,7 +30,7 @@ namespace xr {
         return fmt::format("{}.{}.{}", XR_VERSION_MAJOR(version), XR_VERSION_MINOR(version), XR_VERSION_PATCH(version));
     }
 
-    static inline std::string ToString(XrPosef pose) {
+    static inline std::string ToString(const XrPosef& pose) {
         return fmt::format("p: ({:.3f}, {:.3f}, {:.3f}), o:({:.3f}, {:.3f}, {:.3f}, {:.3f})",
                            pose.position.x,
                            pose.position.y,
@@ -41,7 +41,7 @@ namespace xr {
                            pose.orientation.w);
     }
 
-    static inline std::string ToString(XrFovf fov) {
+    static inline std::string ToString(const XrFovf& fov) {
         return fmt::format(
             "(l:{:.3f}, r:{:.3f}, u:{:.3f}, d:{:.3f})", fov.angleLeft, fov.angleRight, fov.angleUp, fov.angleDown);
     }
@@ -54,12 +54,12 @@ namespace xr {
         return fmt::format("({:.3f}, {:.3f}, {:.3f})", vec.x, vec.y, vec.z);
     }
 
-    static inline std::string ToString(XrRect2Di rect) {
+    static inline std::string ToString(const XrRect2Di& rect) {
         return fmt::format(
             "x:{}, y:{}, w:{}, h:{}", rect.offset.x, rect.offset.y, rect.extent.width, rect.extent.height);
     }
 
-    static inline std::string ToString(XrRect2Df rect) {
+    static inline std::string ToString(const XrRect2Df& rect) {
         return fmt::format(
             "x:{}, y:{}, w:{}, h:{}", rect.offset.x, rect.offset.y, rect.extent.width, rect.extent.height);
     }
