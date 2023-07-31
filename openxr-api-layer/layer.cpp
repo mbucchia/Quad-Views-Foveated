@@ -114,7 +114,7 @@ namespace openxr_api_layer {
                     g_traceProvider, "xrCreateInstance", TLArg(createInfo->enabledApiLayerNames[i], "ApiLayerName"));
             }
 
-            // Bypass the extension unless the app might request quad views.
+            // Bypass the API layer unless the app might request quad views.
             bool requestedQuadViews = false;
             for (uint32_t i = 0; i < createInfo->enabledExtensionCount; i++) {
                 const std::string_view ext(createInfo->enabledExtensionNames[i]);
@@ -1197,7 +1197,7 @@ namespace openxr_api_layer {
                                                         (m_lastFrameWaitTimestamp - lastFrameWaitTimestamp).count());
                             frameState->predictedDisplayPeriod = m_lastPredictedDisplayPeriod;
                         }
-                        frameState->shouldRender = XR_TRUE;
+                        frameState->shouldRender = m_lastShouldRender ? XR_TRUE : XR_FALSE;
 
                         result = XR_SUCCESS;
 
@@ -1215,6 +1215,7 @@ namespace openxr_api_layer {
                             // We must always store those values to properly handle transitions into Turbo Mode.
                             m_lastPredictedDisplayTime = frameState->predictedDisplayTime;
                             m_lastPredictedDisplayPeriod = frameState->predictedDisplayPeriod;
+                            m_lastShouldRender = frameState->shouldRender;
                         }
                     }
                 }
@@ -1596,57 +1597,76 @@ namespace openxr_api_layer {
                 {
                     std::unique_lock lock(m_frameMutex);
 
+                    result = XR_SUCCESS;
                     if (m_asyncWaitPromise.valid()) {
-                        TraceLocalActivity(local);
+                        {
+                            TraceLocalActivity(local);
 
-                        // This is the latest point we must have fully waited a frame before proceeding.
-                        //
-                        // Note: we should not wait infinitely here, however certain patterns of engine calls may cause
-                        // us to attempt a "double xrWaitFrame" when turning on Turbo. Use a timeout to detect that, and
-                        // refrain from enqueing a second wait further down. This isn't a pretty solution, but it is
-                        // simple and it seems to work effectively (minus the 1s freeze observed in-game).
-                        TraceLoggingWriteStart(local, "xrEndFrame_AsyncWaitNow");
-                        const auto ready = m_asyncWaitPromise.wait_for(1s) == std::future_status::ready;
-                        TraceLoggingWriteStop(local, "xrEndFrame_AsyncWaitNow", TLArg(ready, "Ready"));
-                        if (ready) {
-                            m_asyncWaitPromise = {};
+                            // This is the latest point we must have fully waited a frame before proceeding.
+                            //
+                            // Note: we should not wait infinitely here, however certain patterns of engine calls may
+                            // cause us to attempt a "double xrWaitFrame" when turning on Turbo. Use a timeout to detect
+                            // that, and refrain from enqueing a second wait further down. This isn't a pretty solution,
+                            // but it is simple and it seems to work effectively (minus the 1s freeze observed in-game).
+                            TraceLoggingWriteStart(local, "xrEndFrame_AsyncWaitNow");
+                            const auto ready = m_asyncWaitPromise.wait_for(1s) == std::future_status::ready;
+                            TraceLoggingWriteStop(local, "xrEndFrame_AsyncWaitNow", TLArg(ready, "Ready"));
+                            if (ready) {
+                                m_asyncWaitPromise = {};
+                            }
                         }
 
-                        CHECK_XRCMD(OpenXrApi::xrBeginFrame(session, nullptr));
+                        {
+                            TraceLocalActivity(local);
+                            TraceLoggingWriteStart(local, "xrEndFrame_BeginFrame");
+                            result = OpenXrApi::xrBeginFrame(session, nullptr);
+                            // Passthrough errors (eg: XR_ERROR_SESSION_NOT_RUNNING) in case the session state machine
+                            // advanced.
+                            if (XR_FAILED(result)) {
+                                ErrorLog(fmt::format("xrEndFrame: deferred xrBeginFrame failed with {}\n",
+                                                     xr::ToCString(result)));
+                            }
+                            TraceLoggingWriteStop(
+                                local, "xrEndFrame_BeginFrame", TLArg(xr::ToCString(result), "Result"));
+                        }
                     }
 
-                    {
+                    if (XR_SUCCEEDED(result)) {
                         TraceLocalActivity(local);
                         TraceLoggingWriteStart(local, "xrEndFrame_EndFrame");
                         result = OpenXrApi::xrEndFrame(session, &chainFrameEndInfo);
                         TraceLoggingWriteStop(local, "xrEndFrame_EndFrame");
                     }
 
-                    if (m_useTurboMode && !m_asyncWaitPromise.valid()) {
-                        m_asyncWaitPolled = false;
-                        m_asyncWaitCompleted = false;
+                    if (XR_SUCCEEDED(result)) {
+                        if (m_useTurboMode && !m_asyncWaitPromise.valid()) {
+                            m_asyncWaitPolled = false;
+                            m_asyncWaitCompleted = false;
 
-                        // In Turbo mode, we kick off a wait thread immediately.
-                        TraceLoggingWrite(g_traceProvider, "xrEndFrame_AsyncWaitStart");
-                        m_asyncWaitPromise = std::async(std::launch::async, [&, session] {
-                            TraceLocalActivity(local);
+                            // In Turbo mode, we kick off a wait thread immediately.
+                            TraceLoggingWrite(g_traceProvider, "xrEndFrame_AsyncWaitStart");
+                            m_asyncWaitPromise = std::async(std::launch::async, [&, session] {
+                                TraceLocalActivity(local);
 
-                            XrFrameState frameState{XR_TYPE_FRAME_STATE};
-                            TraceLoggingWriteStart(local, "AsyncWaitFrame");
-                            CHECK_XRCMD(OpenXrApi::xrWaitFrame(session, nullptr, &frameState));
-                            TraceLoggingWriteStop(local,
-                                                  "AsyncWaitFrame",
-                                                  TLArg(frameState.predictedDisplayTime, "PredictedDisplayTime"),
-                                                  TLArg(frameState.predictedDisplayPeriod, "PredictedDisplayPeriod"));
-                            {
-                                std::unique_lock lock(m_asyncWaitMutex);
+                                XrFrameState frameState{XR_TYPE_FRAME_STATE};
+                                TraceLoggingWriteStart(local, "AsyncWaitFrame");
+                                CHECK_XRCMD(OpenXrApi::xrWaitFrame(session, nullptr, &frameState));
+                                TraceLoggingWriteStop(
+                                    local,
+                                    "AsyncWaitFrame",
+                                    TLArg(frameState.predictedDisplayTime, "PredictedDisplayTime"),
+                                    TLArg(frameState.predictedDisplayPeriod, "PredictedDisplayPeriod"));
+                                {
+                                    std::unique_lock lock(m_asyncWaitMutex);
 
-                                m_lastPredictedDisplayTime = frameState.predictedDisplayTime;
-                                m_lastPredictedDisplayPeriod = frameState.predictedDisplayPeriod;
+                                    m_lastPredictedDisplayTime = frameState.predictedDisplayTime;
+                                    m_lastPredictedDisplayPeriod = frameState.predictedDisplayPeriod;
+                                    m_lastShouldRender = frameState.shouldRender;
 
-                                m_asyncWaitCompleted = true;
-                            }
-                        });
+                                    m_asyncWaitCompleted = true;
+                                }
+                            });
+                        }
                     }
                 }
             } else {
@@ -2858,6 +2878,7 @@ namespace openxr_api_layer {
         std::future<void> m_asyncWaitPromise;
         XrTime m_lastPredictedDisplayTime{0};
         XrTime m_lastPredictedDisplayPeriod{0};
+        bool m_lastShouldRender{true};
         bool m_asyncWaitPolled{false};
         bool m_asyncWaitCompleted{false};
 
