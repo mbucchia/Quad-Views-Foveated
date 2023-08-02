@@ -748,6 +748,16 @@ namespace openxr_api_layer {
 
                     m_lastGoodEyeTrackingData = std::chrono::steady_clock::now();
                     m_loggedEyeTrackingWarning = false;
+
+                    // HACK: The Oculus runtime hangs upon the first xrWaitFrame() following a session restart. Add a
+                    // call to unblock their state machine.
+                    {
+                        TraceLocalActivity(local);
+                        TraceLoggingWriteStart(local, "xrBeginSession_StaleBeginFrame");
+                        const XrResult result2 = OpenXrApi::xrBeginFrame(session, nullptr);
+                        TraceLoggingWriteStop(
+                            local, "xrBeginSession_StaleBeginFrame", TLArg(xr::ToCString(result2), "Result"));
+                    }
                 }
             }
 
@@ -1654,6 +1664,7 @@ namespace openxr_api_layer {
                                 TraceLoggingWriteStop(
                                     local,
                                     "AsyncWaitFrame",
+                                    TLArg(!!frameState.shouldRender, "ShouldRender"),
                                     TLArg(frameState.predictedDisplayTime, "PredictedDisplayTime"),
                                     TLArg(frameState.predictedDisplayPeriod, "PredictedDisplayPeriod"));
                                 {
