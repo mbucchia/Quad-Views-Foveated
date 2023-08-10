@@ -2012,7 +2012,7 @@ namespace openxr_api_layer {
         bool getEyeGaze(XrTime time, bool getStateOnly, XrVector3f& unitVector) {
             // Clear the cache.
             const auto now = std::chrono::steady_clock::now();
-            if ((now - m_lastGoodEyeTrackingData).count() >= 200'000'000) {
+            if ((now - m_lastGoodEyeTrackingData).count() >= 600'000'000) {
                 m_lastGoodEyeGaze.reset();
             }
 
