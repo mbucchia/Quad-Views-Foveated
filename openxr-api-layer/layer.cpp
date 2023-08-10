@@ -747,6 +747,7 @@ namespace openxr_api_layer {
                     }
 
                     m_lastGoodEyeTrackingData = std::chrono::steady_clock::now();
+                    m_lastGoodEyeGaze.reset();
                     m_loggedEyeTrackingWarning = false;
 
                     // HACK: The Oculus runtime hangs upon the first xrWaitFrame() following a session restart. Add a
@@ -2009,6 +2010,12 @@ namespace openxr_api_layer {
         }
 
         bool getEyeGaze(XrTime time, bool getStateOnly, XrVector3f& unitVector) {
+            // Clear the cache.
+            const auto now = std::chrono::steady_clock::now();
+            if ((now - m_lastGoodEyeTrackingData).count() >= 200'000'000) {
+                m_lastGoodEyeGaze.reset();
+            }
+
             bool result = false;
             switch (m_trackerType) {
             case Tracker::SimulatedTracking:
@@ -2024,15 +2031,26 @@ namespace openxr_api_layer {
                 break;
             }
 
+            if (result) {
+                m_lastGoodEyeTrackingData = now;
+                if (!getStateOnly) {
+                    m_lastGoodEyeGaze = unitVector;
+                }
+                m_loggedEyeTrackingWarning = false;
+            }
+
+            // To avoid warping during blinking, we use a reasonably recent cached gaze vector.
+            bool useCache = false;
+            if (!result && m_lastGoodEyeGaze) {
+                unitVector = m_lastGoodEyeGaze.value();
+                result = useCache = true;
+            }
+
             TraceLoggingWrite(g_traceProvider,
                               "EyeGaze",
                               TLArg(result, "Valid"),
+                              TLArg(useCache, "UsingCache"),
                               TLArg(xr::ToString(unitVector).c_str(), "GazeUnitVector"));
-
-            if (result) {
-                m_lastGoodEyeTrackingData = std::chrono::steady_clock::now();
-                m_loggedEyeTrackingWarning = false;
-            }
 
             return result;
         }
@@ -2904,6 +2922,7 @@ namespace openxr_api_layer {
 
         // For logging useful warnings when eye tracking is not usable.
         std::chrono::time_point<std::chrono::steady_clock> m_lastGoodEyeTrackingData{};
+        std::optional<XrVector3f> m_lastGoodEyeGaze;
         bool m_loggedEyeTrackingWarning{false};
 
         bool m_debugFocusView{false};
