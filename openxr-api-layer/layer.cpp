@@ -780,8 +780,7 @@ namespace openxr_api_layer {
             }
 
             XrSessionActionSetsAttachInfo chainAttachInfo = *attachInfo;
-            std::vector<XrActionSet> actionSets(chainAttachInfo.actionSets,
-                                                chainAttachInfo.actionSets + chainAttachInfo.countActionSets);
+            std::vector<XrActionSet> actionSets;
             if (isSessionHandled(session) && m_eyeTrackerActionSet != XR_NULL_HANDLE) {
                 // Suggest the bindings for the eye tracker. We do this last in order to override previous bindings the
                 // application may have done.
@@ -800,12 +799,15 @@ namespace openxr_api_layer {
                 CHECK_XRCMD(OpenXrApi::xrSuggestInteractionProfileBindings(GetXrInstance(), &suggestedBindings));
 
                 // Inject our actionset.
+                actionSets.assign(chainAttachInfo.actionSets,
+                                  chainAttachInfo.actionSets + chainAttachInfo.countActionSets);
                 actionSets.push_back(m_eyeTrackerActionSet);
                 TraceLoggingWrite(
                     g_traceProvider, "xrAttachSessionActionSets", TLXArg(m_eyeTrackerActionSet, "EyeTrackerActionSet"));
+
+                chainAttachInfo.actionSets = actionSets.data();
+                chainAttachInfo.countActionSets = static_cast<uint32_t>(actionSets.size());
             }
-            chainAttachInfo.actionSets = actionSets.data();
-            chainAttachInfo.countActionSets = static_cast<uint32_t>(actionSets.size());
 
             const XrResult result = OpenXrApi::xrAttachSessionActionSets(session, &chainAttachInfo);
 
@@ -1840,6 +1842,8 @@ namespace openxr_api_layer {
                 activeActionSets.assign(chainSyncInfo.activeActionSets,
                                         chainSyncInfo.activeActionSets + chainSyncInfo.countActiveActionSets);
                 activeActionSets.push_back({m_eyeTrackerActionSet, XR_NULL_PATH});
+                TraceLoggingWrite(
+                    g_traceProvider, "xrSyncActions", TLXArg(m_eyeTrackerActionSet, "EyeTrackerActionSet"));
 
                 chainSyncInfo.activeActionSets = activeActionSets.data();
                 chainSyncInfo.countActiveActionSets = (uint32_t)activeActionSets.size();
