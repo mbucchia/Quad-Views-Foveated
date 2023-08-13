@@ -22,6 +22,7 @@ override_functions = [
     "xrBeginFrame",
     "xrEndFrame",
     "xrPollEvent",
+    "xrSyncActions",
     "xrGetVisibilityMaskKHR",
 ]
 
@@ -39,6 +40,7 @@ requested_functions = [
     "xrAcquireSwapchainImage",
     "xrWaitSwapchainImage",
     "xrReleaseSwapchainImage",
+    "xrPathToString",
     "xrStringToPath",
     "xrCreateActionSet",
     "xrCreateAction",

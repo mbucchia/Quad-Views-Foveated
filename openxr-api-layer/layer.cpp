@@ -749,6 +749,8 @@ namespace openxr_api_layer {
                     m_lastGoodEyeTrackingData = std::chrono::steady_clock::now();
                     m_lastGoodEyeGaze.reset();
                     m_loggedEyeTrackingWarning = false;
+                    m_needPollEvent = m_needAttachActionSets = m_needSyncActions = false;
+                    m_framesElapsed = 0;
 
                     // HACK: The Oculus runtime hangs upon the first xrWaitFrame() following a session restart. Add a
                     // call to unblock their state machine.
@@ -806,6 +808,8 @@ namespace openxr_api_layer {
             chainAttachInfo.countActionSets = static_cast<uint32_t>(actionSets.size());
 
             const XrResult result = OpenXrApi::xrAttachSessionActionSets(session, &chainAttachInfo);
+
+            m_needAttachActionSets = false;
 
             return result;
         }
@@ -1287,25 +1291,51 @@ namespace openxr_api_layer {
             if (XR_SUCCEEDED(result)) {
                 if (isSessionHandled(session)) {
                     if (m_useQuadViews && m_trackerType == Tracker::EyeGazeInteraction) {
-                        // TODO: Some applications may not advance the instance event state machine (via xrPollEvent()),
-                        // which causes actions to always return an inactive state. Force xrPollEvent() here if needed.
-                        XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
-                        XrActiveActionSet actionSet{};
-                        actionSet.actionSet = m_eyeTrackerActionSet;
-                        syncInfo.activeActionSets = &actionSet;
-                        syncInfo.countActiveActionSets = 1;
-                        {
-                            TraceLocalActivity(local);
-                            TraceLoggingWriteStart(local, "xrBeginFrame_SyncActions");
-                            CHECK_XRCMD(xrSyncActions(session, &syncInfo));
-                            TraceLoggingWriteStop(local, "xrBeginFrame_SyncActions");
+                        // Give the app 100 frames to tell us what it intends to do regarding the action system.
+                        if (m_framesElapsed > 100) {
+                            // Some applications may not advance the instance event state machine (via
+                            // xrPollEvent()), which causes actions to always return an inactive state. Force
+                            // xrPollEvent() here if needed.
+                            if (m_needPollEvent) {
+                                TraceLocalActivity(local);
+                                TraceLoggingWriteStart(local, "xrBeginFrame_PollEvent");
+                                XrEventDataBuffer buf{XR_TYPE_EVENT_DATA_BUFFER};
+                                OpenXrApi::xrPollEvent(GetXrInstance(), &buf);
+                                TraceLoggingWriteStop(local, "xrBeginFrame_PollEvent");
+                            }
+
+                            if (m_needAttachActionSets) {
+                                // This will clear the m_needAttachActionSets flag.
+                                TraceLocalActivity(local);
+                                TraceLoggingWriteStart(local, "xrBeginFrame_AttachSessionActionSets");
+                                XrSessionActionSetsAttachInfo attachInfo{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+                                CHECK_XRCMD(xrAttachSessionActionSets(session, &attachInfo));
+                                TraceLoggingWriteStop(local, "xrBeginFrame_AttachSessionActionSets");
+                            }
+
+                            // If an application does not use motion controllers, it is not calling xrSyncActions().
+                            // Make a call here in order to synchronize our action set.
+                            if (m_needSyncActions) {
+                                XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
+                                XrActiveActionSet actionSet{};
+                                actionSet.actionSet = m_eyeTrackerActionSet;
+                                syncInfo.activeActionSets = &actionSet;
+                                syncInfo.countActiveActionSets = 1;
+                                {
+                                    TraceLocalActivity(local);
+                                    TraceLoggingWriteStart(local, "xrBeginFrame_SyncActions");
+                                    CHECK_XRCMD(OpenXrApi::xrSyncActions(session, &syncInfo));
+                                    TraceLoggingWriteStop(local, "xrBeginFrame_SyncActions");
+                                }
+                            }
                         }
                     }
 
                     // Issue a warning if eye tracking was expected but does not seem functional.
                     if (m_trackerType != Tracker::None && !m_loggedEyeTrackingWarning &&
                         (std::chrono::steady_clock::now() - m_lastGoodEyeTrackingData).count() > 60'000'000'000) {
-                        Log("No data received from the eye tracker in 60 seconds! Image quality may be degraded.\n");
+                        Log("No data received from the eye tracker in 60 seconds! Image quality may be "
+                            "degraded.\n");
                         m_loggedEyeTrackingWarning = true;
                     }
 
@@ -1540,9 +1570,9 @@ namespace openxr_api_layer {
                                 }
                             }
 
-                            // Note: if a depth buffer was attached, we will use it as-is (per copy of the proj struct
-                            // below, and therefore its entire chain of next structs). This is good: we will submit a
-                            // depth that matches the composited view, but that is lower resolution.
+                            // Note: if a depth buffer was attached, we will use it as-is (per copy of the proj
+                            // struct below, and therefore its entire chain of next structs). This is good: we will
+                            // submit a depth that matches the composited view, but that is lower resolution.
 
                             projectionAllocator.push_back(*proj);
                             // Our shader always premultiplies the alpha channel.
@@ -1566,9 +1596,9 @@ namespace openxr_api_layer {
                                         it->second.deferredRelease = false;
                                     }
                                 }
-                                // TODO: We need to handle all other types of composition layers in order to mark the
-                                // swapchains for deferred release. Luckily we only need this quirk on Varjo and the
-                                // runtime does not support any other type of composition layers.
+                                // TODO: We need to handle all other types of composition layers in order to mark
+                                // the swapchains for deferred release. Luckily we only need this quirk on Varjo and
+                                // the runtime does not support any other type of composition layers.
                             }
 
                             TraceLoggingWrite(g_traceProvider,
@@ -1615,10 +1645,11 @@ namespace openxr_api_layer {
 
                             // This is the latest point we must have fully waited a frame before proceeding.
                             //
-                            // Note: we should not wait infinitely here, however certain patterns of engine calls may
-                            // cause us to attempt a "double xrWaitFrame" when turning on Turbo. Use a timeout to detect
-                            // that, and refrain from enqueing a second wait further down. This isn't a pretty solution,
-                            // but it is simple and it seems to work effectively (minus the 1s freeze observed in-game).
+                            // Note: we should not wait infinitely here, however certain patterns of engine calls
+                            // may cause us to attempt a "double xrWaitFrame" when turning on Turbo. Use a timeout
+                            // to detect that, and refrain from enqueing a second wait further down. This isn't a
+                            // pretty solution, but it is simple and it seems to work effectively (minus the 1s
+                            // freeze observed in-game).
                             TraceLoggingWriteStart(local, "xrEndFrame_AsyncWaitNow");
                             const auto ready = m_asyncWaitPromise.wait_for(1s) == std::future_status::ready;
                             TraceLoggingWriteStop(local, "xrEndFrame_AsyncWaitNow", TLArg(ready, "Ready"));
@@ -1631,8 +1662,8 @@ namespace openxr_api_layer {
                             TraceLocalActivity(local);
                             TraceLoggingWriteStart(local, "xrEndFrame_BeginFrame");
                             result = OpenXrApi::xrBeginFrame(session, nullptr);
-                            // Passthrough errors (eg: XR_ERROR_SESSION_NOT_RUNNING) in case the session state machine
-                            // advanced.
+                            // Passthrough errors (eg: XR_ERROR_SESSION_NOT_RUNNING) in case the session state
+                            // machine advanced.
                             if (XR_FAILED(result)) {
                                 ErrorLog(fmt::format("xrEndFrame: deferred xrBeginFrame failed with {}\n",
                                                      xr::ToCString(result)));
@@ -1722,6 +1753,8 @@ namespace openxr_api_layer {
 
                     m_gazeSpaces.insert(*space);
                 }
+
+                m_framesElapsed++;
             }
 
             return result;
@@ -1785,6 +1818,40 @@ namespace openxr_api_layer {
             return result;
         }
 
+        // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrSyncActions
+        XrResult xrSyncActions(XrSession session, const XrActionsSyncInfo* syncInfo) override {
+            if (syncInfo->type != XR_TYPE_ACTIONS_SYNC_INFO) {
+                return XR_ERROR_VALIDATION_FAILURE;
+            }
+
+            TraceLoggingWrite(g_traceProvider, "xrSyncActions", TLXArg(session, "Session"));
+            for (uint32_t i = 0; i < syncInfo->countActiveActionSets; i++) {
+                TraceLoggingWrite(
+                    g_traceProvider,
+                    "xrSyncActions",
+                    TLXArg(syncInfo->activeActionSets[i].actionSet, "ActionSet"),
+                    TLArg(getXrPath(syncInfo->activeActionSets[i].subactionPath).c_str(), "SubactionPath"));
+            }
+
+            std::vector<XrActiveActionSet> activeActionSets;
+            XrActionsSyncInfo chainSyncInfo = *syncInfo;
+            // Inject our own actionset if needed.
+            if (m_useQuadViews && m_trackerType == Tracker::EyeGazeInteraction) {
+                activeActionSets.assign(chainSyncInfo.activeActionSets,
+                                        chainSyncInfo.activeActionSets + chainSyncInfo.countActiveActionSets);
+                activeActionSets.push_back({m_eyeTrackerActionSet, XR_NULL_PATH});
+
+                chainSyncInfo.activeActionSets = activeActionSets.data();
+                chainSyncInfo.countActiveActionSets = (uint32_t)activeActionSets.size();
+            }
+
+            const XrResult result = OpenXrApi::xrSyncActions(session, &chainSyncInfo);
+
+            m_needSyncActions = false;
+
+            return result;
+        }
+
         // https://www.khronos.org/registry/OpenXR/specs/1.0/html/xrspec.html#xrPollEvent
         XrResult xrPollEvent(XrInstance instance, XrEventDataBuffer* eventData) override {
             TraceLoggingWrite(g_traceProvider, "xrPollEvent", TLXArg(instance, "Instance"));
@@ -1805,6 +1872,8 @@ namespace openxr_api_layer {
                     }
                 }
             }
+
+            m_needPollEvent = false;
 
             return result;
         }
@@ -2597,6 +2666,19 @@ namespace openxr_api_layer {
             }
         }
 
+        const std::string getXrPath(XrPath path) {
+            if (path == XR_NULL_PATH) {
+                return "";
+            }
+
+            char buf[XR_MAX_PATH_LENGTH];
+            uint32_t count;
+            CHECK_XRCMD(OpenXrApi::xrPathToString(GetXrInstance(), path, sizeof(buf), &count, buf));
+            std::string str;
+            str.assign(buf, count - 1);
+            return str;
+        }
+
         void handleDebugKeys() {
             if (m_debugKeys) {
                 bool log = false;
@@ -2886,6 +2968,11 @@ namespace openxr_api_layer {
         XrAction m_eyeGazeAction{XR_NULL_HANDLE};
         XrSpace m_eyeSpace{XR_NULL_HANDLE};
         XrSpace m_viewSpace{XR_NULL_HANDLE};
+
+        bool m_needPollEvent{true};
+        bool m_needAttachActionSets{true};
+        bool m_needSyncActions{true};
+        uint64_t m_framesElapsed{0};
 
         ComPtr<ID3D11Device5> m_applicationDevice;
         ComPtr<ID3D11DeviceContext4> m_renderContext;
