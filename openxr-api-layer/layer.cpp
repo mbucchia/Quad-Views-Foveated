@@ -2055,10 +2055,13 @@ namespace openxr_api_layer {
             XrActionStatePose actionStatePose{XR_TYPE_ACTION_STATE_POSE, nullptr};
             XrActionStateGetInfo getInfo{XR_TYPE_ACTION_STATE_GET_INFO, nullptr};
             getInfo.action = m_eyeGazeAction;
-            CHECK_XRCMD(OpenXrApi::xrGetActionStatePose(m_session, &getInfo, &actionStatePose));
-            TraceLoggingWrite(g_traceProvider, "EyeGazeInteraction", TLArg(!!actionStatePose.isActive, "Active"));
+            const XrResult result = OpenXrApi::xrGetActionStatePose(m_session, &getInfo, &actionStatePose);
+            TraceLoggingWrite(g_traceProvider,
+                              "EyeGazeInteraction",
+                              TLArg(xr::ToCString(result), "Result"),
+                              TLArg(!!actionStatePose.isActive, "Active"));
 
-            if (!actionStatePose.isActive) {
+            if (XR_FAILED(result) || !actionStatePose.isActive) {
                 return false;
             }
 
