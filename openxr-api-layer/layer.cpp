@@ -107,7 +107,18 @@ namespace openxr_api_layer {
                               TLArg(createInfo->applicationInfo.engineName, "EngineName"),
                               TLArg(createInfo->applicationInfo.engineVersion, "EngineVersion"),
                               TLArg(createInfo->createFlags, "CreateFlags"));
-            Log(fmt::format("Application: {}\n", createInfo->applicationInfo.applicationName));
+            {
+                char path[_MAX_PATH];
+                GetModuleFileNameA(nullptr, path, sizeof(path));
+                std::string_view fullPath(path);
+                size_t offset = fullPath.rfind('\\');
+                if (offset != std::string::npos) {
+                    m_applicationExecutableName = fullPath.substr(offset + 1);
+                } else {
+                    m_applicationExecutableName = fullPath;
+                }
+            }
+            Log(fmt::format("Application: {} ({})\n", createInfo->applicationInfo.applicationName, GetApplicationExecutableName()));
 
             for (uint32_t i = 0; i < createInfo->enabledApiLayerCount; i++) {
                 TraceLoggingWrite(
@@ -297,7 +308,7 @@ namespace openxr_api_layer {
                               TLArg(viewConfigurationTypeCapacityInput, "ViewConfigurationTypeCapacityInput"));
 
             XrResult result = XR_ERROR_RUNTIME_FAILURE;
-            if (isSystemHandled(systemId)) {
+            if (isSystemHandled(systemId) && !m_unadvertiseQuadViews) {
                 if (viewConfigurationTypeCapacityInput) {
                     result = OpenXrApi::xrEnumerateViewConfigurations(instance,
                                                                       systemId,
@@ -723,6 +734,8 @@ namespace openxr_api_layer {
                 Log("Session is using quad views\n");
                 m_useQuadViews = true;
                 chainBeginInfo.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+            } else {
+                Log("Session is not using quad views\n");
             }
 
             const XrResult result = OpenXrApi::xrBeginSession(session, &chainBeginInfo);
@@ -2776,6 +2789,10 @@ namespace openxr_api_layer {
             }
         }
 
+        const std::string& GetApplicationExecutableName() const {
+            return m_applicationExecutableName;
+        }
+
         void LoadConfiguration(const std::filesystem::path& configPath) {
             // Look in %LocalAppData% first, then fallback to your installation folder.
             Log(fmt::format("Trying to locate configuration file at '{}'...\n", configPath.string()));
@@ -2810,6 +2827,8 @@ namespace openxr_api_layer {
                 if (line[0] == '[' && line[line.size() - 1] == ']') {
                     if (line.substr(1, 4) == "app:") {
                         return GetApplicationName().find(line.substr(5, line.size() - 6)) != std::string::npos;
+                    } else if (line.substr(1, 4) == "exe:") {
+                        return GetApplicationExecutableName().find(line.substr(5, line.size() - 6)) != std::string::npos;
                     } else {
                         return m_runtimeName.find(line.substr(1, line.size() - 2)) != std::string::npos ||
                                m_systemName.find(line.substr(1, line.size() - 2)) != std::string::npos;
@@ -2881,6 +2900,9 @@ namespace openxr_api_layer {
                     } else if (name == "turbo_mode") {
                         m_useTurboMode = std::stoi(value);
                         parsed = true;
+                    } else if (name == "unadvertise") {
+                        m_unadvertiseQuadViews = std::stoi(value);
+                        parsed = true;
                     } else if (name == "debug_simulate_tracking") {
                         m_debugSimulateTracking = std::stoi(value);
                         parsed = true;
@@ -2925,6 +2947,7 @@ namespace openxr_api_layer {
             EyeGazeInteraction,
         };
 
+        std::string m_applicationExecutableName;
         bool m_bypassApiLayer{false};
         bool m_useQuadViews{false};
         bool m_requestedFoveatedRendering{false};
@@ -2953,6 +2976,7 @@ namespace openxr_api_layer {
         float m_smoothenFocusViewEdges{0.2f};
         float m_sharpenFocusView{0.7f};
         bool m_useTurboMode{true};
+        bool m_unadvertiseQuadViews{false};
 
         bool m_needComputeBaseFov{true};
         XrFovf m_cachedEyeFov[xr::QuadView::Count]{};
