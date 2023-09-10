@@ -41,9 +41,6 @@ namespace SetupCustomActions
             var proc = Process.GetProcessesByName("msiexec").FirstOrDefault(p => p.MainWindowTitle == "OpenXR-Quad-Views-Foveated");
             var owner = proc != null ? new WindowWrapper(proc.MainWindowHandle) : null;
 
-            // We want to add our layer at the very beginning, so that any other layer like the OpenXR Toolkit layer is following us.
-            // We delete all entries, create our own, and recreate all entries.
-
             Microsoft.Win32.RegistryKey key;
             {
                 key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey("SOFTWARE\\Khronos\\OpenXR\\1\\ApiLayers\\Implicit");
@@ -67,39 +64,17 @@ namespace SetupCustomActions
 
                 key.Close();
             }
-            try
-            {
-                key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey("SOFTWARE\\Khronos\\OpenXR\\1");
-                var activeRuntime = (string)key.GetValue("ActiveRuntime", "");
-
-                if (activeRuntime.EndsWith("\\steamxr_win64.json"))
-                {
-                    MessageBox.Show(owner, "SteamVR OpenXR was detected as your active OpenXR runtime.\n\n" +
-                        "On most devices, SteamVR does not offer eye tracking support via OpenXR.\n" +
-                        "- Meta Quest Pro users: Please make sure to set Oculus as your OpenXR runtime from the Oculus application.\n" +
-                        "- Pimax Crystal/Droolon users: Please make sure to set PimaxXR as your OpenXR runtime from the PimaxXR Control Center.\n" +
-                        "- Varjo users: Please make sure to set Varjo as your OpenXR runtime from Varjo Base's System tab.\n" +
-                        "- Vive Pro Eye users: Please make sure that the Vive Console application is installed. You do not need to change your OpenXR runtime.",
-                        "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-            }
-            catch (Exception)
-            {
-            }
-            finally
-            {
-                if (key != null)
-                {
-                    key.Close();
-                }
-            }
 
             base.OnAfterInstall(savedState);
         }
 
         private void ReOrderApiLayers(Microsoft.Win32.RegistryKey key, string jsonPath)
         {
-            var existingValues = key.GetValueNames();
+            // We want to add our layer near the very beginning, so that any other layer like the OpenXR Toolkit layer are following us.
+            // However, the layer seem to confuse XRNeckSafer and OpenXR-MotionCompensation, so we want to add ourselves after them.
+            // We delete all entries, re-create the XRNeckSafer and OpenXR-MotionCompensation ones if needed, then create our own, and re-create the remaining entries.
+
+            List<String> existingValues = new List<String>(key.GetValueNames());
             var entriesValues = new Dictionary<string, object>();
             foreach (var value in existingValues)
             {
@@ -107,21 +82,35 @@ namespace SetupCustomActions
                 key.DeleteValue(value);
             }
 
-            key.SetValue(jsonPath, 0);
+            void PullToFront(string endsWith)
+            {
+                var index = existingValues.FindIndex(entry => entry.EndsWith(endsWith));
+                if (index > 0)
+                {
+                    existingValues.Insert(0, existingValues[index]);
+                    existingValues.RemoveAt(1 + index);
+                }
+            }
+
+            // Do not re-create keys for previous installs of our layer.
+            existingValues.RemoveAll(entry => entry.EndsWith("OpenXR-Quad-Views-Foveated\\openxr-api-layer.json"));
+
+            // Start at the beginning.
+            existingValues.Insert(0, jsonPath);
+            entriesValues.Remove(jsonPath);
+            entriesValues.Add(jsonPath, 0);
+
+            // Do not re-create keys for previous versions of our layer.
+            existingValues.RemoveAll(entry => entry.EndsWith("OpenXR-Meta-Foveated\\openxr-api-layer.json"));
+
+            // XRNeckSafer must always be first. OXRMC can be next.
+            // We pull them in the opposite order.
+            PullToFront("\\XR_APILAYER_NOVENDOR_motion_compensation.json");
+            PullToFront("\\XR_APILAYER_NOVENDOR_XRNeckSafer.json");
+
+            // Now we create the keys in the desired order.
             foreach (var value in existingValues)
             {
-                // Do not re-create keys for previous versions of our layer.
-                if (value.EndsWith("OpenXR-Meta-Foveated\\openxr-api-layer.json"))
-                {
-                    continue;
-                }
-
-                // Do not re-create our own key. We did it before this loop.
-                if (value == jsonPath)
-                {
-                    continue;
-                }
-
                 key.SetValue(value, entriesValues[value]);
             }
         }
