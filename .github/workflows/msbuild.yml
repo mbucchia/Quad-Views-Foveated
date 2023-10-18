@@ -72,4 +72,10 @@ jobs:
         name: Setup
         path: |
           installer/output/Quad-Views-Foveated.msi
+
+    - name: Publish
+      uses: actions/upload-artifact@v2
+      with:
+        name: Symbols
+        path: |
           bin/x64/Release/XR_APILAYER_MBUCCHIA_quad_views_foveated.pdb
