@@ -762,7 +762,7 @@ namespace openxr_api_layer {
                     m_lastGoodEyeTrackingData = std::chrono::steady_clock::now();
                     m_lastGoodEyeGaze.reset();
                     m_loggedEyeTrackingWarning = false;
-                    m_needPollEvent = m_needAttachActionSets = m_needSyncActions = false;
+                    m_needPollEvent = m_needAttachActionSets = m_needSyncActions = true;
                     m_framesElapsed = 0;
 
                     // HACK: The Oculus runtime hangs upon the first xrWaitFrame() following a session restart. Add a
