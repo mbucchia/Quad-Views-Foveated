@@ -16,6 +16,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Files", "Solution 
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Scripts", "Scripts", "{BA775DE9-671E-4E3B-92AC-9828C2AAF490}"
 	ProjectSection(SolutionItems) = preProject
+		scripts\Capture-ETL.bat = scripts\Capture-ETL.bat
 		scripts\Install-Layer.ps1 = scripts\Install-Layer.ps1
 		scripts\Install-Layer32.ps1 = scripts\Install-Layer32.ps1
 		scripts\Tracing.wprp = scripts\Tracing.wprp
