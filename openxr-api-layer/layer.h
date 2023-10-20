@@ -28,7 +28,7 @@ namespace openxr_api_layer {
 
     const std::string LayerName = LAYER_NAME;
     const std::string LayerPrettyName = "Quad-Views-Foveated";
-    const std::string VersionString = "v1.1.2";
+    const std::string VersionString = "v1.1.3";
 
     // Singleton accessor.
     OpenXrApi* GetInstance();
