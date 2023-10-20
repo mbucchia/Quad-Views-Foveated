@@ -143,10 +143,22 @@ copy $(SolutionDir)\settings.cfg $(OutDir)
       </Message>
     </PreLinkEvent>
     <PreBuildEvent>
-      <Command>python $(ProjectDir)\framework\dispatch_generator.py</Command>
+      <Command>python $(ProjectDir)\framework\dispatch_generator.py
+
+if not exist $(SolutionDir)\version.info goto :skip_version
+for /f "delims== tokens=1,2" %%G in ($(SolutionDir)\version.info) do set %%G=%%H
+$(SolutionDir)\scripts\sed.exe -i "s/const unsigned int LayerVersionMajor = .*;$/const unsigned int LayerVersionMajor = %major%;/g" $(ProjectDir)\version.h
+$(SolutionDir)\scripts\sed.exe -i "s/const unsigned int LayerVersionMinor = .*;$/const unsigned int LayerVersionMinor = %minor%;/g" $(ProjectDir)\version.h
+$(SolutionDir)\scripts\sed.exe -i "s/const unsigned int LayerVersionPatch = .*;$/const unsigned int LayerVersionPatch = %patch%;/g" $(ProjectDir)\version.h
+$(SolutionDir)\scripts\sed.exe -i "s/FILEVERSION .*$/FILEVERSION %major%,%minor%,%patch%,0/g" $(ProjectDir)\resource.rc
+$(SolutionDir)\scripts\sed.exe -i "s/PRODUCTVERSION .*$/PRODUCTVERSION %major%,%minor%,%patch%,0/g" $(ProjectDir)\resource.rc
+$(SolutionDir)\scripts\sed.exe -i "s/VALUE \"FileVersion\", \".*\"$/VALUE \"FileVersion\", \"%major%.%minor%.%patch%.0\"/g" $(ProjectDir)\resource.rc
+$(SolutionDir)\scripts\sed.exe -i "s/VALUE \"ProductVersion\", \".*\"$/VALUE \"ProductVersion\", \"%major%.%minor%.%patch%.0\"/g" $(ProjectDir)\resource.rc
+:skip_version
+</Command>
     </PreBuildEvent>
     <PreBuildEvent>
-      <Message>Generating layer dispatcher...</Message>
+      <Message>Generating layer dispatcher &amp; version info...</Message>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -195,10 +207,22 @@ copy $(SolutionDir)\settings.cfg $(OutDir)
       </Message>
     </PreLinkEvent>
     <PreBuildEvent>
-      <Command>python $(ProjectDir)\framework\dispatch_generator.py</Command>
+      <Command>python $(ProjectDir)\framework\dispatch_generator.py
+
+if not exist $(SolutionDir)\version.info goto :skip_version
+for /f "delims== tokens=1,2" %%G in ($(SolutionDir)\version.info) do set %%G=%%H
+$(SolutionDir)\scripts\sed.exe -i "s/const unsigned int LayerVersionMajor = .*;$/const unsigned int LayerVersionMajor = %major%;/g" $(ProjectDir)\version.h
+$(SolutionDir)\scripts\sed.exe -i "s/const unsigned int LayerVersionMinor = .*;$/const unsigned int LayerVersionMinor = %minor%;/g" $(ProjectDir)\version.h
+$(SolutionDir)\scripts\sed.exe -i "s/const unsigned int LayerVersionPatch = .*;$/const unsigned int LayerVersionPatch = %patch%;/g" $(ProjectDir)\version.h
+$(SolutionDir)\scripts\sed.exe -i "s/FILEVERSION .*$/FILEVERSION %major%,%minor%,%patch%,0/g" $(ProjectDir)\resource.rc
+$(SolutionDir)\scripts\sed.exe -i "s/PRODUCTVERSION .*$/PRODUCTVERSION %major%,%minor%,%patch%,0/g" $(ProjectDir)\resource.rc
+$(SolutionDir)\scripts\sed.exe -i "s/VALUE \"FileVersion\", \".*\"$/VALUE \"FileVersion\", \"%major%.%minor%.%patch%.0\"/g" $(ProjectDir)\resource.rc
+$(SolutionDir)\scripts\sed.exe -i "s/VALUE \"ProductVersion\", \".*\"$/VALUE \"ProductVersion\", \"%major%.%minor%.%patch%.0\"/g" $(ProjectDir)\resource.rc
+:skip_version
+</Command>
     </PreBuildEvent>
     <PreBuildEvent>
-      <Message>Generating layer dispatcher...</Message>
+      <Message>Generating layer dispatcher &amp; version info...</Message>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -251,10 +275,22 @@ copy $(SolutionDir)\settings.cfg $(OutDir)
       </Message>
     </PreLinkEvent>
     <PreBuildEvent>
-      <Command>python $(ProjectDir)\framework\dispatch_generator.py</Command>
+      <Command>python $(ProjectDir)\framework\dispatch_generator.py
+
+if not exist $(SolutionDir)\version.info goto :skip_version
+for /f "delims== tokens=1,2" %%G in ($(SolutionDir)\version.info) do set %%G=%%H
+$(SolutionDir)\scripts\sed.exe -i "s/const unsigned int LayerVersionMajor = .*;$/const unsigned int LayerVersionMajor = %major%;/g" $(ProjectDir)\version.h
+$(SolutionDir)\scripts\sed.exe -i "s/const unsigned int LayerVersionMinor = .*;$/const unsigned int LayerVersionMinor = %minor%;/g" $(ProjectDir)\version.h
+$(SolutionDir)\scripts\sed.exe -i "s/const unsigned int LayerVersionPatch = .*;$/const unsigned int LayerVersionPatch = %patch%;/g" $(ProjectDir)\version.h
+$(SolutionDir)\scripts\sed.exe -i "s/FILEVERSION .*$/FILEVERSION %major%,%minor%,%patch%,0/g" $(ProjectDir)\resource.rc
+$(SolutionDir)\scripts\sed.exe -i "s/PRODUCTVERSION .*$/PRODUCTVERSION %major%,%minor%,%patch%,0/g" $(ProjectDir)\resource.rc
+$(SolutionDir)\scripts\sed.exe -i "s/VALUE \"FileVersion\", \".*\"$/VALUE \"FileVersion\", \"%major%.%minor%.%patch%.0\"/g" $(ProjectDir)\resource.rc
+$(SolutionDir)\scripts\sed.exe -i "s/VALUE \"ProductVersion\", \".*\"$/VALUE \"ProductVersion\", \"%major%.%minor%.%patch%.0\"/g" $(ProjectDir)\resource.rc
+:skip_version
+</Command>
     </PreBuildEvent>
     <PreBuildEvent>
-      <Message>Generating layer dispatcher...</Message>
+      <Message>Generating layer dispatcher &amp; version info...</Message>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -307,10 +343,22 @@ copy $(SolutionDir)\settings.cfg $(OutDir)
       </Message>
     </PreLinkEvent>
     <PreBuildEvent>
-      <Command>python $(ProjectDir)\framework\dispatch_generator.py</Command>
+      <Command>python $(ProjectDir)\framework\dispatch_generator.py
+
+if not exist $(SolutionDir)\version.info goto :skip_version
+for /f "delims== tokens=1,2" %%G in ($(SolutionDir)\version.info) do set %%G=%%H
+$(SolutionDir)\scripts\sed.exe -i "s/const unsigned int LayerVersionMajor = .*;$/const unsigned int LayerVersionMajor = %major%;/g" $(ProjectDir)\version.h
+$(SolutionDir)\scripts\sed.exe -i "s/const unsigned int LayerVersionMinor = .*;$/const unsigned int LayerVersionMinor = %minor%;/g" $(ProjectDir)\version.h
+$(SolutionDir)\scripts\sed.exe -i "s/const unsigned int LayerVersionPatch = .*;$/const unsigned int LayerVersionPatch = %patch%;/g" $(ProjectDir)\version.h
+$(SolutionDir)\scripts\sed.exe -i "s/FILEVERSION .*$/FILEVERSION %major%,%minor%,%patch%,0/g" $(ProjectDir)\resource.rc
+$(SolutionDir)\scripts\sed.exe -i "s/PRODUCTVERSION .*$/PRODUCTVERSION %major%,%minor%,%patch%,0/g" $(ProjectDir)\resource.rc
+$(SolutionDir)\scripts\sed.exe -i "s/VALUE \"FileVersion\", \".*\"$/VALUE \"FileVersion\", \"%major%.%minor%.%patch%.0\"/g" $(ProjectDir)\resource.rc
+$(SolutionDir)\scripts\sed.exe -i "s/VALUE \"ProductVersion\", \".*\"$/VALUE \"ProductVersion\", \"%major%.%minor%.%patch%.0\"/g" $(ProjectDir)\resource.rc
+:skip_version
+</Command>
     </PreBuildEvent>
     <PreBuildEvent>
-      <Message>Generating layer dispatcher...</Message>
+      <Message>Generating layer dispatcher &amp; version info...</Message>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -320,6 +368,7 @@ copy $(SolutionDir)\settings.cfg $(OutDir)
     <ClInclude Include="framework\util.h" />
     <ClInclude Include="layer.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="resource.h" />
     <ClInclude Include="views.h" />
     <ClInclude Include="utils\general.h" />
     <ClInclude Include="utils\graphics.h" />
@@ -453,6 +502,9 @@ copy $(SolutionDir)\settings.cfg $(OutDir)
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">CAS_SAMPLE_FP16=0;CAS_SAMPLE_SHARPEN_ONLY=1;WIDTH=64;HEIGHT=1;DEPTH=1</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">CAS_SAMPLE_FP16=0;CAS_SAMPLE_SHARPEN_ONLY=1;WIDTH=64;HEIGHT=1;DEPTH=1</PreprocessorDefinitions>
     </FxCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resource.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

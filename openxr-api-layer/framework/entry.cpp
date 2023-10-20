@@ -26,6 +26,7 @@
 
 #include "dispatch.h"
 #include "log.h"
+#include "version.h"
 
 namespace openxr_api_layer {
     // The path where the DLL is loaded from (eg: to load data files).
@@ -38,6 +39,9 @@ namespace openxr_api_layer {
         // The file logger.
         std::ofstream logStream;
     } // namespace log
+
+    const std::string VersionString = fmt::format("v{}.{}.{}", LayerVersionMajor, LayerVersionMinor, LayerVersionPatch);
+
 } // namespace openxr_api_layer
 
 using namespace openxr_api_layer;
