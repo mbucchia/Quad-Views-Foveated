@@ -33,6 +33,9 @@ EndProject
 Project("{54435603-DBB4-11D2-8724-00A0C9A8B90C}") = "installer", "installer\installer.vdproj", "{8CD923BD-6B3B-4409-8290-FDAC00DCB59D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CustomSetup", "CustomSetup\CustomSetup.csproj", "{B6C07936-A1D2-4A80-B559-B55E3F15CC97}"
+	ProjectSection(ProjectDependencies) = postProject
+		{93D573D0-634F-4BA0-8FE0-FB63D7D00A05} = {93D573D0-634F-4BA0-8FE0-FB63D7D00A05}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
