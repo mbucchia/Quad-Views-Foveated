@@ -118,7 +118,8 @@ namespace openxr_api_layer {
                     m_applicationExecutableName = fullPath;
                 }
             }
-            Log(fmt::format("Application: {} ({})\n", createInfo->applicationInfo.applicationName, GetApplicationExecutableName()));
+            Log(fmt::format(
+                "Application: {} ({})\n", createInfo->applicationInfo.applicationName, GetApplicationExecutableName()));
 
             for (uint32_t i = 0; i < createInfo->enabledApiLayerCount; i++) {
                 TraceLoggingWrite(
@@ -651,6 +652,8 @@ namespace openxr_api_layer {
                         CHECK_XRCMD(OpenXrApi::xrCreateReferenceSpace(*session, &spaceCreateInfo, &m_viewSpace));
                     }
 
+                    m_needPollEvent = m_needAttachActionSets = m_needSyncActions = true;
+
                     m_session = *session;
                 }
             }
@@ -762,7 +765,6 @@ namespace openxr_api_layer {
                     m_lastGoodEyeTrackingData = std::chrono::steady_clock::now();
                     m_lastGoodEyeGaze.reset();
                     m_loggedEyeTrackingWarning = false;
-                    m_needPollEvent = m_needAttachActionSets = m_needSyncActions = true;
                     m_framesElapsed = 0;
 
                     // HACK: The Oculus runtime hangs upon the first xrWaitFrame() following a session restart. Add a
@@ -1727,6 +1729,8 @@ namespace openxr_api_layer {
                         }
                     }
                 }
+
+                m_framesElapsed++;
             } else {
                 result = OpenXrApi::xrEndFrame(session, frameEndInfo);
             }
@@ -1768,8 +1772,6 @@ namespace openxr_api_layer {
 
                     m_gazeSpaces.insert(*space);
                 }
-
-                m_framesElapsed++;
             }
 
             return result;
@@ -2828,7 +2830,8 @@ namespace openxr_api_layer {
                     if (line.substr(1, 4) == "app:") {
                         return GetApplicationName().find(line.substr(5, line.size() - 6)) != std::string::npos;
                     } else if (line.substr(1, 4) == "exe:") {
-                        return GetApplicationExecutableName().find(line.substr(5, line.size() - 6)) != std::string::npos;
+                        return GetApplicationExecutableName().find(line.substr(5, line.size() - 6)) !=
+                               std::string::npos;
                     } else {
                         return m_runtimeName.find(line.substr(1, line.size() - 2)) != std::string::npos ||
                                m_systemName.find(line.substr(1, line.size() - 2)) != std::string::npos;
