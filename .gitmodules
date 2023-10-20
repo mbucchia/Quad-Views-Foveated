@@ -10,3 +10,6 @@
 [submodule "external/FidelityFX-CAS"]
 	path = external/FidelityFX-CAS
 	url = https://github.com/GPUOpen-Effects/FidelityFX-CAS.git
+[submodule "external/fmt"]
+	path = external/fmt
+	url = https://github.com/fmtlib/fmt.git

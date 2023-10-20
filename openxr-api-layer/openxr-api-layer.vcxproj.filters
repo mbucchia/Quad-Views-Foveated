@@ -18,6 +18,9 @@
     <Filter Include="Shader Files">
       <UniqueIdentifier>{18c0442a-dcc5-451b-9beb-33acd4efbd5f}</UniqueIdentifier>
     </Filter>
+    <Filter Include="fmt">
+      <UniqueIdentifier>{f859919c-f06c-4ab3-93c7-9fb1cfc3df3e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">
@@ -87,6 +90,9 @@
     </ClCompile>
     <ClCompile Include="utils\general.cpp">
       <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\fmt\src\format.cc">
+      <Filter>fmt</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
