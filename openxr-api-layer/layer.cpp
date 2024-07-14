@@ -1513,6 +1513,10 @@ namespace openxr_api_layer {
                                                       "xrEndFrame_CreateSwapchain",
                                                       TLArg(m_fullFovResolution.width, "Width"),
                                                       TLArg(m_fullFovResolution.height, "Height"));
+                                    if ((createInfo.usageFlags & XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT) == 0) {
+                                        // ID3D11Device::CreateRenderTargetView requires the resource have a render target bit
+                                        return XR_ERROR_VALIDATION_FAILURE;
+                                    }
                                     CHECK_XRCMD(OpenXrApi::xrCreateSwapchain(
                                         session, &createInfo, &swapchainForStereoView.fullFovSwapchain[viewIndex]));
                                 }
