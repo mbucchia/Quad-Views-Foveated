@@ -383,7 +383,7 @@ namespace openxr_api_layer
 
 	private:
 		XrResult xrGetInstanceProcAddrInternal(XrInstance instance, const char* name, PFN_xrVoidFunction* function);
-		friend XrResult xrGetInstanceProcAddr(XrInstance instance, const char* name, PFN_xrVoidFunction* function);
+		friend XrResult XRAPI_CALL xrGetInstanceProcAddr(XrInstance instance, const char* name, PFN_xrVoidFunction* function);
 
 		PFN_xrDestroyInstance m_xrDestroyInstance{nullptr};
 		PFN_xrEnumerateInstanceExtensionProperties m_xrEnumerateInstanceExtensionProperties{nullptr};
