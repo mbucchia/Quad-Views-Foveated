@@ -170,7 +170,7 @@ namespace openxr_api_layer {
             m_needDeferredSwapchainReleaseQuirk = runtimeName.find("Varjo") != std::string::npos;
 
             // Game-specific quirks.
-            m_needFocusFovCorrectionQuirk = GetApplicationName() == "DCS World";
+            m_needFocusFovCorrectionQuirk = GetApplicationName() == "DCS World" || GetApplicationName() == "DCS";
 
             return XR_SUCCESS;
         }
@@ -2988,6 +2988,9 @@ namespace openxr_api_layer {
                         parsed = true;
                     } else if (name == "force_no_eye_tracking") {
                         m_forceNoEyeTracking = std::stoi(value);
+                        parsed = true;
+                    } else if (name == "force_focus_fov_quirk") {
+                        m_needFocusFovCorrectionQuirk = m_needFocusFovCorrectionQuirk || std::stoi(value);
                         parsed = true;
                     } else if (name == "smoothen_focus_view_edges") {
                         m_smoothenFocusViewEdges = std::clamp(std::stof(value), 0.f, 0.5f);
