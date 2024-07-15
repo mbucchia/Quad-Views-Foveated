@@ -1560,6 +1560,8 @@ namespace openxr_api_layer {
                                     createInfo.arraySize = 1;
                                     createInfo.width = m_fullFovResolution.width;
                                     createInfo.height = m_fullFovResolution.height;
+                                    // We will use a Pixel Shader for rendering into this swapchain.
+                                    createInfo.usageFlags |= XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
                                     TraceLoggingWrite(g_traceProvider,
                                                       "xrEndFrame_CreateSwapchain",
                                                       TLArg(m_fullFovResolution.width, "Width"),
