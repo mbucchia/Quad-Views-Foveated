@@ -45,6 +45,12 @@
         }
         "Entry"
         {
+        "MsmKey" = "8:_62B53E0DD9D944398A904A79FAF2A780"
+        "OwnerKey" = "8:_UNDEFINED"
+        "MsmSig" = "8:_UNDEFINED"
+        }
+        "Entry"
+        {
         "MsmKey" = "8:_6E01812B7B3443F8974CA8EA0C86F92A"
         "OwnerKey" = "8:_UNDEFINED"
         "MsmSig" = "8:_UNDEFINED"
@@ -58,6 +64,12 @@
         "Entry"
         {
         "MsmKey" = "8:_783F0578410447B490A7B578316FEA5D"
+        "OwnerKey" = "8:_UNDEFINED"
+        "MsmSig" = "8:_UNDEFINED"
+        }
+        "Entry"
+        {
+        "MsmKey" = "8:_9A9BEFA785284EFC82F7B251FD2B0810"
         "OwnerKey" = "8:_UNDEFINED"
         "MsmSig" = "8:_UNDEFINED"
         }
@@ -275,6 +287,26 @@
             "IsDependency" = "11:FALSE"
             "IsolateTo" = "8:"
             }
+            "{1FB2D0AE-D3B9-43D4-B9DD-F88EC61E35DE}:_62B53E0DD9D944398A904A79FAF2A780"
+            {
+            "SourcePath" = "8:..\\bin\\Win32\\Release\\openxr-api-layer-32.json"
+            "TargetName" = "8:openxr-api-layer-32.json"
+            "Tag" = "8:"
+            "Folder" = "8:_505DF0FD526F4594B101F5A5B0F2DC83"
+            "Condition" = "8:"
+            "Transitive" = "11:FALSE"
+            "Vital" = "11:TRUE"
+            "ReadOnly" = "11:FALSE"
+            "Hidden" = "11:FALSE"
+            "System" = "11:FALSE"
+            "Permanent" = "11:FALSE"
+            "SharedLegacy" = "11:FALSE"
+            "PackageAs" = "3:1"
+            "Register" = "3:1"
+            "Exclude" = "11:FALSE"
+            "IsDependency" = "11:FALSE"
+            "IsolateTo" = "8:"
+            }
             "{1FB2D0AE-D3B9-43D4-B9DD-F88EC61E35DE}:_6E01812B7B3443F8974CA8EA0C86F92A"
             {
             "SourcePath" = "8:..\\bin\\x64\\Release\\openxr-api-layer.json"
@@ -319,6 +351,26 @@
             {
             "SourcePath" = "8:..\\THIRD_PARTY"
             "TargetName" = "8:THIRD_PARTY"
+            "Tag" = "8:"
+            "Folder" = "8:_505DF0FD526F4594B101F5A5B0F2DC83"
+            "Condition" = "8:"
+            "Transitive" = "11:FALSE"
+            "Vital" = "11:TRUE"
+            "ReadOnly" = "11:FALSE"
+            "Hidden" = "11:FALSE"
+            "System" = "11:FALSE"
+            "Permanent" = "11:FALSE"
+            "SharedLegacy" = "11:FALSE"
+            "PackageAs" = "3:1"
+            "Register" = "3:1"
+            "Exclude" = "11:FALSE"
+            "IsDependency" = "11:FALSE"
+            "IsolateTo" = "8:"
+            }
+            "{1FB2D0AE-D3B9-43D4-B9DD-F88EC61E35DE}:_9A9BEFA785284EFC82F7B251FD2B0810"
+            {
+            "SourcePath" = "8:..\\bin\\Win32\\Release\\XR_APILAYER_MBUCCHIA_quad_views_foveated-32.dll"
+            "TargetName" = "8:XR_APILAYER_MBUCCHIA_quad_views_foveated-32.dll"
             "Tag" = "8:"
             "Folder" = "8:_505DF0FD526F4594B101F5A5B0F2DC83"
             "Condition" = "8:"
@@ -484,6 +536,98 @@
                     "Transitive" = "11:FALSE"
                         "Keys"
                         {
+                            "{60EA8692-D2D5-43EB-80DC-7906BF13D6EF}:_1F11BE9C51594EEB910319B06A09AC36"
+                            {
+                            "Name" = "8:WOW6432Node"
+                            "Condition" = "8:"
+                            "AlwaysCreate" = "11:FALSE"
+                            "DeleteAtUninstall" = "11:FALSE"
+                            "Transitive" = "11:FALSE"
+                                "Keys"
+                                {
+                                    "{60EA8692-D2D5-43EB-80DC-7906BF13D6EF}:_47BA2202994F4539AD1CAC37C4DE4940"
+                                    {
+                                    "Name" = "8:Khronos"
+                                    "Condition" = "8:"
+                                    "AlwaysCreate" = "11:FALSE"
+                                    "DeleteAtUninstall" = "11:FALSE"
+                                    "Transitive" = "11:FALSE"
+                                        "Keys"
+                                        {
+                                            "{60EA8692-D2D5-43EB-80DC-7906BF13D6EF}:_A9C8ED8B682A46FDB27E8072C66FFA44"
+                                            {
+                                            "Name" = "8:OpenXR"
+                                            "Condition" = "8:"
+                                            "AlwaysCreate" = "11:FALSE"
+                                            "DeleteAtUninstall" = "11:FALSE"
+                                            "Transitive" = "11:FALSE"
+                                                "Keys"
+                                                {
+                                                    "{60EA8692-D2D5-43EB-80DC-7906BF13D6EF}:_271E91569C12446BB3BA046D752D7DD2"
+                                                    {
+                                                    "Name" = "8:1"
+                                                    "Condition" = "8:"
+                                                    "AlwaysCreate" = "11:FALSE"
+                                                    "DeleteAtUninstall" = "11:FALSE"
+                                                    "Transitive" = "11:FALSE"
+                                                        "Keys"
+                                                        {
+                                                            "{60EA8692-D2D5-43EB-80DC-7906BF13D6EF}:_1D3E02DEE3D547279784008FCBF5647C"
+                                                            {
+                                                            "Name" = "8:ApiLayers"
+                                                            "Condition" = "8:"
+                                                            "AlwaysCreate" = "11:FALSE"
+                                                            "DeleteAtUninstall" = "11:FALSE"
+                                                            "Transitive" = "11:FALSE"
+                                                                "Keys"
+                                                                {
+                                                                    "{60EA8692-D2D5-43EB-80DC-7906BF13D6EF}:_675633AC02924937A0C601731BA68334"
+                                                                    {
+                                                                    "Name" = "8:Implicit"
+                                                                    "Condition" = "8:"
+                                                                    "AlwaysCreate" = "11:FALSE"
+                                                                    "DeleteAtUninstall" = "11:FALSE"
+                                                                    "Transitive" = "11:FALSE"
+                                                                        "Keys"
+                                                                        {
+                                                                        }
+                                                                        "Values"
+                                                                        {
+                                                                            "{ADCFDA98-8FDD-45E4-90BC-E3D20B029870}:_4C1859FBE8EA4FD085733D5E0CC80BA3"
+                                                                            {
+                                                                            "Name" = "8:[TARGETDIR]openxr-api-layer-32.json"
+                                                                            "Condition" = "8:"
+                                                                            "Transitive" = "11:FALSE"
+                                                                            "ValueTypes" = "3:3"
+                                                                            "Value" = "3:0"
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                                "Values"
+                                                                {
+                                                                }
+                                                            }
+                                                        }
+                                                        "Values"
+                                                        {
+                                                        }
+                                                    }
+                                                }
+                                                "Values"
+                                                {
+                                                }
+                                            }
+                                        }
+                                        "Values"
+                                        {
+                                        }
+                                    }
+                                }
+                                "Values"
+                                {
+                                }
+                            }
                             "{60EA8692-D2D5-43EB-80DC-7906BF13D6EF}:_94ECE270DB2949998E741C72F0CC7BD8"
                             {
                             "Name" = "8:Khronos"

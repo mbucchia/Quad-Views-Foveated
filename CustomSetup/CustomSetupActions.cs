@@ -64,6 +64,14 @@ namespace SetupCustomActions
 
                 key.Close();
             }
+            {
+                key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey("SOFTWARE\\WOW6432Node\\Khronos\\OpenXR\\1\\ApiLayers\\Implicit");
+                var jsonPath = installPath + "\\openxr-api-layer-32.json";
+
+                ReOrderApiLayers(key, jsonPath);
+
+                key.Close();
+            }
 
             base.OnAfterInstall(savedState);
         }
@@ -91,9 +99,6 @@ namespace SetupCustomActions
                     existingValues.RemoveAt(1 + index);
                 }
             }
-
-            // Do not re-create keys for previous installs of our layer.
-            existingValues.RemoveAll(entry => entry.EndsWith("OpenXR-Quad-Views-Foveated\\openxr-api-layer.json"));
 
             // Start at the beginning.
             existingValues.Insert(0, jsonPath);
